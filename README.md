@@ -25,9 +25,20 @@
 - Google OR-Tools
 
 您可以使用 pip 安装所需的库：
+
 ```bash
 pip install ortools
 ```
+
+## 自编译
+
+```bash
+pip install ortools
+pyinstaller gui.py
+```
+
+如需以后可以自行修改shapes.json，以实现自定义形状。
+可自行取消`gui.spec`最后一段的注释，以文件夹方式打包。
 
 ## 如何使用
 
