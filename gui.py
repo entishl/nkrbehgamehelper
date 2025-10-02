@@ -5,6 +5,8 @@ import json
 from random import choice
 from collections import Counter
 import threading
+import webbrowser
+from tkinter import font as tkfont
 
 from src.solver import solve_packing
 from src.utils import resource_path
@@ -98,6 +100,22 @@ class ShapePackingGUI(tk.Tk):
         )
         batch_format_button.pack(side=tk.LEFT)
 
+        # --- AI识图超链接 ---
+        ai_vision_link_label = ttk.Label(
+            button_frame, text="AI识图(需网络支持)", foreground="blue", cursor="hand2"
+        )
+        ai_vision_link_label.pack(side=tk.LEFT, padx=(5, 0))
+
+        # 添加下划线
+        underline_font = tkfont.Font(
+            ai_vision_link_label, ai_vision_link_label.cget("font")
+        )
+        underline_font.configure(underline=True)
+        ai_vision_link_label.configure(font=underline_font)
+
+        # 绑定点击事件
+        ai_vision_link_label.bind("<Button-1>", self.open_ai_vision_link)
+
         # Right frame for results
         right_frame = ttk.LabelFrame(top_frame, text="Output")
         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
@@ -130,6 +148,10 @@ class ShapePackingGUI(tk.Tk):
         )
         time_limit_entry.pack(side=tk.LEFT, padx=(0, 5))
 
+    def open_ai_vision_link(self, event):
+        """在浏览器中打开AI识图的链接"""
+        webbrowser.open_new(r"https://aistudio.google.com/app/prompts?state=%7B%22ids%22:%5B%221h-kYgsI_r3o0gKRwpkzA9zwcO33ECEAl%22%5D,%22action%22:%22open%22,%22userId%22:%22116876243841507178556%22,%22resourceKeys%22:%7B%7D%7D&usp=sharing")  # noqa
+
     def open_batch_format_dialog(self):
         """Opens a dialog to get JSON input for batch formatting."""
         dialog = tk.Toplevel(self)
@@ -138,7 +160,7 @@ class ShapePackingGUI(tk.Tk):
         dialog.transient(self)
         dialog.grab_set()
 
-        ttk.Label(dialog, text="请在此处粘贴JSON文本（有问题看readme）:").pack(padx=10, pady=(10, 5))
+        ttk.Label(dialog, text="请在此处粘贴JSON文本:").pack(padx=10, pady=(10, 5))
 
         text_input = tk.Text(dialog, height=10)
         text_input.pack(padx=10, pady=5, fill=tk.BOTH, expand=True)
@@ -211,7 +233,7 @@ class ShapePackingGUI(tk.Tk):
                 parent=self,
             )
         else:
-            messagebox.showinfo("完成", "批量设置成功！", parent=self)
+            messagebox.showinfo("完成", "批量设置成功！,请人工核对，特别是RL和SG的数量是否正确！", parent=self)
 
     def toggle_always_on_top(self):
         """Toggles the always on top status of the window."""
