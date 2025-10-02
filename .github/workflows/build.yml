@@ -13,6 +13,8 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
 
     - name: Set up Python
       uses: actions/setup-python@v6
@@ -21,13 +23,25 @@ jobs:
 
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
+        python -m pip install --upgrade pip setuptools wheel
         pip install -r requirements.txt
 
     - name: Build with PyInstaller
-      run: pyinstaller gui.spec
+      run: |
+        pyinstaller --clean --noconfirm gui.spec
+
+    - name: List dist artifacts
+      if: always()
+      run: |
+        if (Test-Path dist) {
+          Get-ChildItem dist -Recurse | Format-Table -AutoSize
+        } else {
+          Write-Host 'dist directory not found'
+        }
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         files: dist/gui.exe
