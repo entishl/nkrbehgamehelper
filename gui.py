@@ -84,11 +84,19 @@ class ShapePackingGUI(tk.Tk):
         )
         total_area_label.pack(pady=(5, 2))
 
-        # --- Clear Button for shape entries ---
+        # --- Control Buttons Frame ---
+        button_frame = ttk.Frame(left_frame)
+        button_frame.pack(pady=2)
+
         clear_button = ttk.Button(
-            left_frame, text="Clear", command=self.clear_shape_entries
+            button_frame, text="Clear", command=self.clear_shape_entries
         )
-        clear_button.pack(pady=2)
+        clear_button.pack(side=tk.LEFT, padx=(0, 5))
+
+        batch_format_button = ttk.Button(
+            button_frame, text="一键输入", command=self.open_batch_format_dialog
+        )
+        batch_format_button.pack(side=tk.LEFT)
 
         # Right frame for results
         right_frame = ttk.LabelFrame(top_frame, text="Output")
@@ -121,6 +129,89 @@ class ShapePackingGUI(tk.Tk):
             bottom_frame, textvariable=self.time_limit_var, width=5
         )
         time_limit_entry.pack(side=tk.LEFT, padx=(0, 5))
+
+    def open_batch_format_dialog(self):
+        """Opens a dialog to get JSON input for batch formatting."""
+        dialog = tk.Toplevel(self)
+        dialog.title("一键输入")
+        dialog.geometry("400x300")
+        dialog.transient(self)
+        dialog.grab_set()
+
+        ttk.Label(dialog, text="请在此处粘贴JSON文本（有问题看readme）:").pack(padx=10, pady=(10, 5))
+
+        text_input = tk.Text(dialog, height=10)
+        text_input.pack(padx=10, pady=5, fill=tk.BOTH, expand=True)
+        text_input.focus_set()
+
+        def on_apply():
+            json_string = text_input.get("1.0", tk.END)
+            self.apply_json_input(json_string)
+            dialog.destroy()
+
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(pady=10)
+
+        apply_button = ttk.Button(button_frame, text="应用", command=on_apply)
+        apply_button.pack(side=tk.LEFT, padx=5)
+
+        cancel_button = ttk.Button(button_frame, text="取消", command=dialog.destroy)
+        cancel_button.pack(side=tk.LEFT, padx=5)
+
+        dialog.wait_window()
+
+    def apply_json_input(self, json_string):
+        """Parses JSON from the given string and updates shape quantities."""
+        if not json_string.strip():
+            return  # Ignore if the input is empty
+
+        try:
+            data = json.loads(json_string)
+            if not isinstance(data, dict):
+                raise TypeError("JSON data must be an object (dictionary).")
+        except json.JSONDecodeError:
+            messagebox.showerror("错误", "无效的JSON格式。", parent=self)
+            return
+        except TypeError as e:
+            messagebox.showerror("错误", f"JSON格式错误: {e}", parent=self)
+            return
+        except Exception as e:
+            messagebox.showerror("错误", f"发生未知错误: {e}", parent=self)
+            return
+
+        # Reset all entries to 0 first
+        self.clear_shape_entries()
+
+        # Update entries based on JSON data
+        unmatched_keys = []
+        for name, count in data.items():
+            if name in self.shape_entries:
+                try:
+                    # Ensure count is a non-negative integer
+                    value = int(count)
+                    if value < 0:
+                        value = 0
+
+                    entry = self.shape_entries[name]
+                    entry.delete(0, tk.END)
+                    entry.insert(0, str(value))
+                except (ValueError, TypeError):
+                    # If count is not a valid number, keep it as 0
+                    continue
+            else:
+                unmatched_keys.append(name)
+
+        # Update total area
+        self._update_total_area()
+
+        if unmatched_keys:
+            messagebox.showwarning(
+                "完成",
+                f"批量设置成功！\n\n以下形状未在GUI中找到，已忽略：\n{', '.join(unmatched_keys)}",
+                parent=self,
+            )
+        else:
+            messagebox.showinfo("完成", "批量设置成功！", parent=self)
 
     def toggle_always_on_top(self):
         """Toggles the always on top status of the window."""
