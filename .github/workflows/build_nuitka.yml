@@ -1,0 +1,59 @@
+name: build with Nuitka
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip ortools nuitka
+
+    - name: Download and extract UPX
+      run: |
+        Invoke-WebRequest -Uri "https://github.com/upx/upx/releases/download/v5.0.2/upx-5.0.2-win64.zip" -OutFile "upx.zip"
+        Expand-Archive -Path "upx.zip" -DestinationPath "D:\"
+
+    - name: Collect ortools DLL list
+      id: dlls
+      shell: python
+      run: |
+        import os, glob, ortools
+        ortools_path = ortools.__path__[0]
+        libs_dir = os.path.join(ortools_path, ".libs")
+        dll_files = glob.glob(os.path.join(libs_dir, "*.dll"))
+        include_args = " ".join([f"--include-data-files=\"{dll}=ortools/.libs/{os.path.basename(dll)}\"" for dll in dll_files])
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+            f.write(f"include_args={include_args}\n")
+
+    - name: Compile with Nuitka
+      shell: cmd
+      run: >
+        python -m nuitka
+        --clang
+        --onefile
+        --onefile-no-compression
+        --assume-yes-for-downloads
+        --msvc=latest
+        --output-dir=dist
+        --enable-plugin=tk-inter,upx
+        --upx-binary=D:\upx-5.0.2-win64
+        --include-data-files=shapes.json=shapes.json
+        ${{ steps.dlls.outputs.include_args }}
+        gui.py
+
+    - name: Upload dist as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: nuitka-dist
+        path: dist/gui.exe
