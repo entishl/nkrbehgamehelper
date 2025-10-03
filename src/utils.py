@@ -1,17 +1,19 @@
 import sys
 import os
+from pathlib import Path
 
-def resource_path(relative_path) -> str | None:
-    """Get absolute path to resource, works for dev and for PyInstaller/Nuitka."""
-    
-    candidates = [
-        os.path.join(os.path.dirname(os.path.dirname(__file__)), relative_path),
-        os.path.join(getattr(sys, '_MEIPASS', ''), relative_path),
-        os.path.join(os.path.abspath('.'), relative_path),
-    ]
 
-    for path in candidates:
-        if path and os.path.exists(path):
-            return path
-    
-    return None
+def resource_path(relative_path: str) -> str:
+    try:
+        base_path = Path(sys._MEIPASS)  # type: ignore
+    except AttributeError:
+        base_path = Path(__file__).resolve().parent.parent
+
+    final_path = base_path / relative_path
+
+    # 可选：如果希望在返回前就确认文件存在，可以取消下面的注释。
+    # 但这会改变原始函数的行为，需要评估对项目的影响。
+    # if not final_path.exists():
+    #     raise FileNotFoundError(f"Resource not found at: {final_path}")
+
+    return str(final_path)

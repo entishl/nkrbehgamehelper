@@ -47,7 +47,7 @@ jobs:
         --msvc=latest
         --output-dir=dist
         --enable-plugin=tk-inter,upx
-        --upx-binary=D:\upx-5.0.2-win64
+        --upx-binary=D:\upx-5.0.2-win64\upx.exe
         --include-data-files=shapes.json=shapes.json
         ${{ steps.dlls.outputs.include_args }}
         gui.py
