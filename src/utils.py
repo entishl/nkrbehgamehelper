@@ -1,13 +1,17 @@
 import sys
 import os
 
-
 def resource_path(relative_path):
-    """Get absolute path to resource, works for dev and for PyInstaller"""
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
+    """Get absolute path to resource, works for dev and for PyInstaller or Nuitka"""
 
-    return os.path.join(base_path, relative_path)
+    if os.path.exists(os.path.join(os.path.dirname(os.path.dirname(__file__)),relative_path)):
+        return os.path.join(os.path.dirname(os.path.dirname(__file__)),relative_path)
+
+    try:
+        if os.path.exists(os.path.join(sys._MEIPASS, relative_path)):
+            return os.path.join(sys._MEIPASS, relative_path)
+    except:
+        ...
+
+    if os.path.exists(os.path.join(os.path.abspath("."), relative_path)):
+        return os.path.join(os.path.abspath("."), relative_path)
