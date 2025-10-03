@@ -115,4 +115,4 @@ dmypy.json
 plans/
 docs/
 
-.github/workflows/
+.github\workflows\build.yml
