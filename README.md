@@ -34,7 +34,7 @@ pip install ortools
 
 ```bash
 pip install ortools
-pyinstaller gui.py
+pyinstaller gui.spec
 ```
 
 如需以后可以自行修改shapes.json，以实现自定义形状。
