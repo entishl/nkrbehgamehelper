@@ -20,7 +20,7 @@ class ShapePackingGUI(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Shape Packing Calculator")
-        self.geometry("1000x800")  # Increased height for the new grid
+        self.geometry("1000x850")  # Increased height for the new grid
 
         self.always_on_top = tk.BooleanVar()
         self.always_on_top.set(False)
