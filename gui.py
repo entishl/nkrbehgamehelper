@@ -265,7 +265,7 @@ class ShapePackingGUI(tk.Tk):
             col = i % num_columns
 
             shape_frame = ttk.Frame(grid_container)
-            shape_frame.grid(row=row, column=col, padx=2, pady=3, sticky="nsew")
+            shape_frame.grid(row=row, column=col, padx=2, pady=1, sticky="nsew")
             grid_container.grid_columnconfigure(col, weight=1)
 
             # Canvas for shape visualization
@@ -282,8 +282,8 @@ class ShapePackingGUI(tk.Tk):
             )
 
             # Canvas for shape visualization
-            canvas = tk.Canvas(shape_frame, width=50, height=50)
-            canvas.grid(row=0, column=1, rowspan=2, padx=(0, 10))
+            canvas = tk.Canvas(shape_frame, width=40, height=40)
+            canvas.grid(row=0, column=1, rowspan=2, padx=(0, 5))
             self.draw_shape(canvas, shape_data["points"], shape_data["color"])
 
             # Shape name
@@ -412,9 +412,9 @@ class ShapePackingGUI(tk.Tk):
         max_y = max(p[1] for p in points)
 
         # Scale and center the shape
-        scale = 35 / max(max_x - min_x + 1, max_y - min_y + 1)
-        offset_x = (50 - (max_x - min_x) * scale) / 2
-        offset_y = (50 - (max_y - min_y) * scale) / 2
+        scale = 30 / max(max_x - min_x + 1, max_y - min_y + 1)
+        offset_x = (40 - (max_x - min_x) * scale) / 2
+        offset_y = (40 - (max_y - min_y) * scale) / 2
 
         for x, y in points:
             x0 = (x - min_x) * scale + offset_x
