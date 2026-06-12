@@ -75,12 +75,13 @@ class ShapePackingGUI(tk.Tk):
         )
         max_button.grid(row=9, column=0, columnspan=9, pady=(5, 0))
 
-        # --- Shape Quantities ---
-        self.shape_entries = {}
-        self.load_shapes(left_frame)
-
         # --- Total Area Display ---
         self.total_area_var = tk.StringVar(value="总面积: 0")
+
+        # --- Shape Quantities ---
+        self.shapes_container_parent = left_frame
+        self.load_shapes(self.shapes_container_parent)
+
         total_area_label = ttk.Label(
             left_frame, textvariable=self.total_area_var, font=("Arial", 10, "bold")
         )
@@ -98,23 +99,12 @@ class ShapePackingGUI(tk.Tk):
         batch_format_button = ttk.Button(
             button_frame, text="一键输入", command=self.open_batch_format_dialog
         )
-        batch_format_button.pack(side=tk.LEFT)
+        batch_format_button.pack(side=tk.LEFT, padx=(0, 5))
 
-        # --- AI识图超链接 ---
-        ai_vision_link_label = ttk.Label(
-            button_frame, text="AI识图(需网络支持)", foreground="blue", cursor="hand2"
+        manage_shapes_button = ttk.Button(
+            button_frame, text="形状管理", command=self.open_manage_shapes_dialog
         )
-        ai_vision_link_label.pack(side=tk.LEFT, padx=(5, 0))
-
-        # 添加下划线
-        underline_font = tkfont.Font(
-            ai_vision_link_label, ai_vision_link_label.cget("font")
-        )
-        underline_font.configure(underline=True)
-        ai_vision_link_label.configure(font=underline_font)
-
-        # 绑定点击事件
-        ai_vision_link_label.bind("<Button-1>", self.open_ai_vision_link)
+        manage_shapes_button.pack(side=tk.LEFT)
 
         # Right frame for results
         right_frame = ttk.LabelFrame(top_frame, text="Output")
@@ -147,10 +137,6 @@ class ShapePackingGUI(tk.Tk):
             bottom_frame, textvariable=self.time_limit_var, width=5
         )
         time_limit_entry.pack(side=tk.LEFT, padx=(0, 5))
-
-    def open_ai_vision_link(self, event):
-        """在浏览器中打开AI识图的链接"""
-        webbrowser.open_new(r"https://aistudio.google.com/app/prompts?state=%7B%22ids%22:%5B%221h-kYgsI_r3o0gKRwpkzA9zwcO33ECEAl%22%5D,%22action%22:%22open%22,%22userId%22:%22116876243841507178556%22,%22resourceKeys%22:%7B%7D%7D&usp=sharing")  # noqa
 
     def open_batch_format_dialog(self):
         """Opens a dialog to get JSON input for batch formatting."""
@@ -251,31 +237,59 @@ class ShapePackingGUI(tk.Tk):
             label.config(fg="black")
 
     def load_shapes(self, parent_frame):
+        # 1. Save existing counts and lock states if they exist
+        old_counts = {}
+        old_locks = {}
+        if hasattr(self, "shape_entries"):
+            for name, entry in self.shape_entries.items():
+                try:
+                    old_counts[name] = entry.get()
+                except Exception:
+                    pass
+        if hasattr(self, "shape_lock_vars"):
+            for name, var in self.shape_lock_vars.items():
+                try:
+                    old_locks[name] = var.get()
+                except Exception:
+                    pass
+
+        # 2. Destroy the existing grid container if it exists
+        if hasattr(self, "shapes_grid_container") and self.shapes_grid_container:
+            self.shapes_grid_container.destroy()
+
         shape_file_path = resource_path("shapes.json")
         with open(shape_file_path, "r") as f:
             self.shapes_data = json.load(f)
 
         # Create a container frame for the grid
-        grid_container = ttk.Frame(parent_frame)
-        grid_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.shapes_grid_container = ttk.Frame(parent_frame)
+        self.shapes_grid_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        self.shape_entries = {}
+        self.shape_lock_vars = {}
+        self.shape_lock_labels = {}
 
         num_columns = 2
         for i, shape_data in enumerate(self.shapes_data):
             row = i // num_columns
             col = i % num_columns
 
-            shape_frame = ttk.Frame(grid_container)
+            shape_frame = ttk.Frame(self.shapes_grid_container)
             shape_frame.grid(row=row, column=col, padx=2, pady=1, sticky="nsew")
-            grid_container.grid_columnconfigure(col, weight=1)
+            self.shapes_grid_container.grid_columnconfigure(col, weight=1)
 
-            # Canvas for shape visualization
             # Lock button
             lock_var = tk.BooleanVar()
+            lock_var.set(old_locks.get(shape_data["name"], False))
             self.shape_lock_vars[shape_data["name"]] = lock_var
 
             lock_label = tk.Label(shape_frame, text="🔒")
             lock_label.grid(row=0, column=0, rowspan=2, padx=(0, 5))
             self.shape_lock_labels[shape_data["name"]] = lock_label
+            if lock_var.get():
+                lock_label.config(fg="blue")
+            else:
+                lock_label.config(fg="black")
             lock_label.bind(
                 "<Button-1>",
                 lambda event, s=shape_data["name"]: self.toggle_lock_state(s),
@@ -296,7 +310,7 @@ class ShapePackingGUI(tk.Tk):
 
             entry = ttk.Entry(entry_frame, width=5)
             entry.pack(side=tk.LEFT)
-            entry.insert(0, "0")
+            entry.insert(0, old_counts.get(shape_data["name"], "0"))
             self.shape_entries[shape_data["name"]] = entry
             entry.bind("<KeyRelease>", lambda event: self._update_total_area())
 
@@ -315,6 +329,9 @@ class ShapePackingGUI(tk.Tk):
                 command=lambda e=entry: self._decrement_value(e),
             )
             down_button.pack(side=tk.LEFT, padx=(2, 0))
+
+        # Update total area calculation to reflect restored/loaded states
+        self._update_total_area()
 
     def _increment_value(self, entry):
         try:
@@ -351,7 +368,8 @@ class ShapePackingGUI(tk.Tk):
             except (ValueError, KeyError):
                 continue  # Ignore invalid entries or shapes not found
 
-        self.total_area_var.set(f"总面积: {total_area}")
+        if hasattr(self, "total_area_var"):
+            self.total_area_var.set(f"总面积: {total_area}")
 
     def toggle_lock_state(self, shape_name):
         """Toggles the lock state for a given shape."""
@@ -560,6 +578,250 @@ class ShapePackingGUI(tk.Tk):
             status_text = status_map.get(result["status"], result["status"])
 
         self.visualizer.visualize(result, unplaced_shapes, allowed_cells, status_text)
+
+
+    def open_manage_shapes_dialog(self):
+        """打开形状管理对话框，允许管理和新增形状"""
+        dialog = tk.Toplevel(self)
+        dialog.title("形状管理")
+        dialog.geometry("900x550")
+        dialog.transient(self)
+        dialog.grab_set()
+
+        # 主布局：左右分栏
+        left_pane = ttk.LabelFrame(dialog, text="现有形状列表", padding=10)
+        left_pane.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        right_pane = ttk.LabelFrame(dialog, text="新增/编辑形状", padding=10)
+        right_pane.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # --- 左侧面板 ---
+        columns = ("name", "area", "color")
+        tree = ttk.Treeview(left_pane, columns=columns, show="headings", selectmode="browse")
+        tree.heading("name", text="形状名称")
+        tree.heading("area", text="面积")
+        tree.heading("color", text="颜色 Hex")
+        
+        tree.column("name", width=100, anchor=tk.CENTER)
+        tree.column("area", width=80, anchor=tk.CENTER)
+        tree.column("color", width=100, anchor=tk.CENTER)
+        
+        # 加上滚动条
+        scrollbar = ttk.Scrollbar(left_pane, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        tree.pack(fill=tk.BOTH, expand=True, pady=5)
+
+        def populate_tree():
+            for item in tree.get_children():
+                tree.delete(item)
+            for shape in self.shapes_data:
+                tree.insert("", tk.END, values=(shape["name"], shape["area"], shape["color"]))
+
+        # 绑定点击事件
+        def on_tree_select(event):
+            selected = tree.selection()
+            if not selected:
+                return
+            item_values = tree.item(selected[0], "values")
+            name = item_values[0]
+            shape = next((s for s in self.shapes_data if s["name"] == name), None)
+            if shape:
+                load_shape_into_editor(shape)
+
+        tree.bind("<<TreeviewSelect>>", on_tree_select)
+
+        # 删除按钮
+        btn_frame = ttk.Frame(left_pane)
+        btn_frame.pack(fill=tk.X, pady=5)
+
+        def delete_selected_shape():
+            selected = tree.selection()
+            if not selected:
+                messagebox.showwarning("警告", "请先在列表中选择要删除的形状。", parent=dialog)
+                return
+            name = tree.item(selected[0], "values")[0]
+            if messagebox.askyesno("确认删除", f"确定要删除形状 '{name}' 吗？\n删除后将无法恢复。", parent=dialog):
+                self.shapes_data = [s for s in self.shapes_data if s["name"] != name]
+                save_shapes_to_file()
+                populate_tree()
+                self.load_shapes(self.shapes_container_parent)
+                clear_editor()
+
+        delete_btn = ttk.Button(btn_frame, text="删除选中形状", command=delete_selected_shape)
+        delete_btn.pack(side=tk.LEFT, padx=5)
+
+        # --- 右侧面板 (编辑器) ---
+        # 1. 形状名称
+        name_frame = ttk.Frame(right_pane)
+        name_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(name_frame, text="形状名称:").pack(side=tk.LEFT, padx=5)
+        name_entry = ttk.Entry(name_frame, width=20)
+        name_entry.pack(side=tk.LEFT, padx=5)
+
+        # 2. 颜色选择
+        color_frame = ttk.Frame(right_pane)
+        color_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(color_frame, text="选择颜色:").pack(side=tk.LEFT, padx=5)
+        
+        current_color = ["#3357FF"]
+        
+        color_preview = tk.Canvas(
+            color_frame, 
+            width=30, 
+            height=20, 
+            bg=current_color[0], 
+            highlightthickness=1, 
+            highlightbackground="gray"
+        )
+        color_preview.pack(side=tk.LEFT, padx=5)
+        
+        def choose_color():
+            from tkinter import colorchooser
+            color_code = colorchooser.askcolor(title="选择形状颜色", initialcolor=current_color[0], parent=dialog)
+            if color_code[1]:
+                current_color[0] = color_code[1]
+                color_preview.config(bg=current_color[0])
+                # 联动更新当前编辑网格中已选格子的颜色
+                for r_idx in range(6):
+                    for c_idx in range(6):
+                        if editor_grid_status[r_idx][c_idx] == 1:
+                            editor_grid_cells[r_idx][c_idx].config(bg=current_color[0])
+                            
+        color_btn = ttk.Button(color_frame, text="调色板", command=choose_color)
+        color_btn.pack(side=tk.LEFT, padx=5)
+
+        # 3. 6x6 网格
+        grid_container = ttk.Frame(right_pane)
+        grid_container.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        grid_frame = ttk.LabelFrame(grid_container, text="绘制形状 (点击方块选中/取消)", padding=5)
+        grid_frame.pack(anchor=tk.CENTER)
+
+        editor_grid_status = [[0] * 6 for _ in range(6)]
+        editor_grid_cells = []
+        
+        def toggle_editor_cell(r_val, c_val):
+            if editor_grid_status[r_val][c_val] == 1:
+                editor_grid_status[r_val][c_val] = 0
+                editor_grid_cells[r_val][c_val].config(bg="white")
+            else:
+                editor_grid_status[r_val][c_val] = 1
+                editor_grid_cells[r_val][c_val].config(bg=current_color[0])
+
+        cell_size = 30
+        for r in range(6):
+            row_cells = []
+            for c in range(6):
+                canvas = tk.Canvas(
+                    grid_frame,
+                    width=cell_size,
+                    height=cell_size,
+                    bg="white",
+                    highlightthickness=1,
+                    highlightbackground="gray",
+                )
+                canvas.grid(row=r, column=c, padx=1, pady=1)
+                canvas.bind(
+                    "<Button-1>", lambda e, r_v=r, c_v=c: toggle_editor_cell(r_v, c_v)
+                )
+                row_cells.append(canvas)
+            editor_grid_cells.append(row_cells)
+
+        # 加载形状到编辑器的辅助函数
+        def load_shape_into_editor(shape):
+            clear_editor()
+            name_entry.insert(0, shape["name"])
+            current_color[0] = shape["color"]
+            color_preview.config(bg=current_color[0])
+            for x, y in shape["points"]:
+                if 0 <= x < 6 and 0 <= y < 6:
+                    editor_grid_status[y][x] = 1
+                    editor_grid_cells[y][x].config(bg=current_color[0])
+
+        # 重置编辑器
+        def clear_editor():
+            name_entry.delete(0, tk.END)
+            current_color[0] = choice(["#FF5733", "#33FF57", "#3357FF", "#F3FF33", "#FF33A1", "#A133FF"])
+            color_preview.config(bg=current_color[0])
+            for r_idx in range(6):
+                for c_idx in range(6):
+                    editor_grid_status[r_idx][c_idx] = 0
+                    editor_grid_cells[r_idx][c_idx].config(bg="white")
+
+        # 4. 控制按钮
+        edit_btn_frame = ttk.Frame(right_pane)
+        edit_btn_frame.pack(fill=tk.X, pady=5)
+
+        clear_btn = ttk.Button(edit_btn_frame, text="重置编辑器", command=clear_editor)
+        clear_btn.pack(side=tk.LEFT, padx=5)
+
+        def save_shapes_to_file():
+            shape_file_path = resource_path("shapes.json")
+            try:
+                with open(shape_file_path, "w", encoding="utf-8") as f_out:
+                    json.dump(self.shapes_data, f_out, indent=2, ensure_ascii=False)
+            except Exception as ex:
+                messagebox.showerror("文件保存失败", f"无法写入 shapes.json:\n{ex}", parent=dialog)
+
+        def save_shape_from_editor():
+            name = name_entry.get().strip()
+            if not name:
+                messagebox.showerror("错误", "请输入形状名称！", parent=dialog)
+                return
+            
+            # 收集点
+            pts = []
+            for r_idx in range(6):
+                for c_idx in range(6):
+                    if editor_grid_status[r_idx][c_idx] == 1:
+                        # c是x，r是y
+                        pts.append([c_idx, r_idx])
+            
+            if not pts:
+                messagebox.showerror("错误", "请在网格中绘制形状（至少选择一个方块）！", parent=dialog)
+                return
+
+            # 归一化
+            min_x_val = min(p[0] for p in pts)
+            min_y_val = min(p[1] for p in pts)
+            normalized_pts = [[p[0] - min_x_val, p[1] - min_y_val] for p in pts]
+            normalized_pts.sort(key=lambda p: (p[1], p[0]))
+
+            new_shape = {
+                "name": name,
+                "area": len(normalized_pts),
+                "points": normalized_pts,
+                "color": current_color[0]
+            }
+
+            # 判断是否已存在
+            existing_idx = next((idx for idx, s in enumerate(self.shapes_data) if s["name"] == name), -1)
+            if existing_idx != -1:
+                if messagebox.askyesno("覆盖确认", f"形状 '{name}' 已存在。是否覆盖修改它？", parent=dialog):
+                    self.shapes_data[existing_idx] = new_shape
+                else:
+                    return
+            else:
+                self.shapes_data.append(new_shape)
+
+            save_shapes_to_file()
+            populate_tree()
+            self.load_shapes(self.shapes_container_parent)
+            messagebox.showinfo("成功", f"形状 '{name}' 已保存并应用！", parent=dialog)
+
+        save_btn = ttk.Button(edit_btn_frame, text="保存/新增形状", command=save_shape_from_editor)
+        save_btn.pack(side=tk.RIGHT, padx=5)
+
+        # 底部关闭按钮
+        close_frame = ttk.Frame(dialog)
+        close_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
+        close_btn = ttk.Button(close_frame, text="关闭窗口", command=dialog.destroy)
+        close_btn.pack(anchor=tk.CENTER)
+
+        # 初始化树状列表
+        populate_tree()
+        dialog.wait_window()
 
 
 if __name__ == "__main__":
