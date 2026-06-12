@@ -2,10 +2,67 @@ import os
 from collections import defaultdict
 from ortools.sat.python import cp_model
 from ortools.sat.python.cp_model import CpSolverSolutionCallback
-from typing import List, Dict, Tuple, Optional
+from typing import Dict, List, Optional, Tuple
 
 from .data_models import Shape, PlacedShape, PackingResult, PackingStatus
 from .decomposition import decompose_shape_to_rectangles
+
+Point = Tuple[int, int]
+
+
+def normalize_points(points: List[Point]) -> List[Point]:
+    """Normalize points so the shape's top-left occupied cell is (0, 0)."""
+    if not points:
+        return []
+
+    min_x = min(x for x, _ in points)
+    min_y = min(y for _, y in points)
+    return sorted((x - min_x, y - min_y) for x, y in points)
+
+
+def rotate_points(points: List[Point], rotation: int) -> List[Point]:
+    """Rotate points clockwise by 0/90/180/270 degrees and normalize them."""
+    normalized_points = normalize_points(points)
+
+    if rotation == 0:
+        rotated = normalized_points
+    elif rotation == 90:
+        rotated = [(y, -x) for x, y in normalized_points]
+    elif rotation == 180:
+        rotated = [(-x, -y) for x, y in normalized_points]
+    elif rotation == 270:
+        rotated = [(-y, x) for x, y in normalized_points]
+    else:
+        raise ValueError("rotation must be one of 0, 90, 180, or 270")
+
+    return normalize_points(rotated)
+
+
+def generate_unique_orientations(points: List[Point]) -> List[Dict]:
+    """Return unique 0/90/180/270-degree orientations for a shape."""
+    orientations = []
+    seen = set()
+
+    for rotation in (0, 90, 180, 270):
+        rotated_points = rotate_points(points, rotation)
+        key = tuple(rotated_points)
+        if key in seen:
+            continue
+
+        seen.add(key)
+        width = max((x for x, _ in rotated_points), default=-1) + 1
+        height = max((y for _, y in rotated_points), default=-1) + 1
+        orientations.append(
+            {
+                "rotation": rotation,
+                "points": rotated_points,
+                "width": width,
+                "height": height,
+                "rectangles": decompose_shape_to_rectangles(rotated_points),
+            }
+        )
+
+    return orientations
 
 
 class SolutionCallback(CpSolverSolutionCallback):
@@ -27,6 +84,42 @@ class SolutionCallback(CpSolverSolutionCallback):
         placed_shapes_count = sum(self.Value(s["is_used"]) for s in self._shape_vars)
         current_area = sum(s["area"] * self.Value(s["is_used"]) for s in self._shape_vars)
 
+        # 仅当当前解更优时，才保存它
+        if current_area > self._best_objective_value:
+            self._best_objective_value = current_area
+            print(f"找到更优解: 面积 = {current_area}。已保存。")
+            placed_shapes = []
+            for s in self._shape_vars:
+                if not self.Value(s["is_used"]):
+                    continue
+
+                selected_orientation = None
+                for orientation in s["orientations"]:
+                    if self.Value(orientation["is_used"]):
+                        selected_orientation = orientation
+                        break
+
+                if selected_orientation is None:
+                    continue
+
+                placed_shapes.append(
+                    {
+                        "name": s["name"],
+                        "x": self.Value(selected_orientation["x"]),
+                        "y": self.Value(selected_orientation["y"]),
+                        "points": selected_orientation["points"],
+                        "color": s["color"],
+                        "rotation": selected_orientation["rotation"],
+                    }
+                )
+
+            self.solution = {
+                "placed_shapes": placed_shapes,
+                "unplaced_shapes": [
+                    s["original_shape"].name for s in self._shape_vars if not self.Value(s["is_used"])
+                ],
+            }
+
         # 检查是否达成了“完美解”并提前停止
         if self._strategy == "P0":  # 策略：装下所有形状
             if placed_shapes_count == self._total_shapes_count:
@@ -37,26 +130,6 @@ class SolutionCallback(CpSolverSolutionCallback):
             if current_area == self._board_area:
                 print("完美解达成 (P1): 棋盘已占满。停止搜索。")
                 self.StopSearch()
-
-        # 仅当当前解更优时，才保存它
-        if current_area > self._best_objective_value:
-            self._best_objective_value = current_area
-            print(f"找到更优解: 面积 = {current_area}。已保存。")
-            self.solution = {
-                "placed_shapes": [
-                    {
-                        "name": s["name"],
-                        "x": self.Value(s["x"]),
-                        "y": self.Value(s["y"]),
-                        "points": s["points"],
-                        "color": s["color"],
-                    }
-                    for s in self._shape_vars if self.Value(s["is_used"])
-                ],
-                "unplaced_shapes": [
-                    s["original_shape"].name for s in self._shape_vars if not self.Value(s["is_used"])
-                ],
-            }
 
 
 class PackingSolver:
@@ -80,7 +153,7 @@ class PackingSolver:
 
         self.model = cp_model.CpModel()
         self.shape_vars: List[Dict] = []
-        self.decomposed_shapes: Dict[str, List[Tuple[int, int, int, int]]] = {}
+        self.orientation_cache: Dict[Tuple[Point, ...], List[Dict]] = {}
 
     def solve(self) -> PackingResult:
         """
@@ -113,7 +186,7 @@ class PackingSolver:
         solver.parameters.num_search_workers = num_workers
         print(f"求解器将使用 {num_workers} (共 {num_cores} 个逻辑核心)。")
 
-        # --- 步骤 6 & 7: 实例化回调并使用 SearchForAllSolutions ---
+        # --- 步骤 6 & 7: 实例化回调并求解 ---
         solution_callback = SolutionCallback(
             self.shape_vars, board_area, len(self.shapes_to_pack), strategy
         )
@@ -122,33 +195,61 @@ class PackingSolver:
         return self._process_solution(solver, status, solution_callback)
 
     def _prepare_data(self):
-        """预处理数据，例如分解形状。"""
+        """预处理每个形状的唯一旋转朝向。"""
         for shape in self.shapes_to_pack:
-            if shape.name not in self.decomposed_shapes:
-                self.decomposed_shapes[shape.name] = decompose_shape_to_rectangles(shape.points)
+            normalized_points = normalize_points([tuple(p) for p in shape.points])
+            cache_key = tuple(normalized_points)
+            if cache_key not in self.orientation_cache:
+                self.orientation_cache[cache_key] = generate_unique_orientations(normalized_points)
+
+    def _get_shape_orientations(self, shape: Shape) -> List[Dict]:
+        normalized_points = normalize_points([tuple(p) for p in shape.points])
+        return self.orientation_cache[tuple(normalized_points)]
 
     def _create_variables(self):
         """为模型创建变量。"""
         for i, shape in enumerate(self.shapes_to_pack):
-            max_dx = max(p[0] for p in shape.points) if shape.points else 0
-            max_dy = max(p[1] for p in shape.points) if shape.points else 0
-            shape_width = max_dx + 1
-            shape_height = max_dy + 1
-
             is_used = self.model.NewBoolVar(f"is_used_{i}")
-            x = self.model.NewIntVar(0, self.board_width - shape_width, f"x_{i}")
-            y = self.model.NewIntVar(0, self.board_height - shape_height, f"y_{i}")
+            orientation_vars = []
+
+            for j, orientation_data in enumerate(self._get_shape_orientations(shape)):
+                shape_width = orientation_data["width"]
+                shape_height = orientation_data["height"]
+
+                # 该朝向在棋盘尺寸内完全不可能放下时，不创建候选变量。
+                if shape_width > self.board_width or shape_height > self.board_height:
+                    continue
+
+                orientation_is_used = self.model.NewBoolVar(f"is_used_{i}_rot_{orientation_data['rotation']}")
+                x = self.model.NewIntVar(0, self.board_width - shape_width, f"x_{i}_rot_{orientation_data['rotation']}")
+                y = self.model.NewIntVar(0, self.board_height - shape_height, f"y_{i}_rot_{orientation_data['rotation']}")
+
+                orientation_vars.append(
+                    {
+                        "rotation": orientation_data["rotation"],
+                        "points": orientation_data["points"],
+                        "rectangles": orientation_data["rectangles"],
+                        "width": shape_width,
+                        "height": shape_height,
+                        "is_used": orientation_is_used,
+                        "x": x,
+                        "y": y,
+                    }
+                )
+
+            if orientation_vars:
+                self.model.Add(sum(o["is_used"] for o in orientation_vars) == is_used)
+            else:
+                self.model.Add(is_used == 0)
 
             self.shape_vars.append(
                 {
                     "id": i,
                     "name": shape.name,
-                    "points": shape.points,
                     "area": shape.area,
                     "color": shape.color,
                     "is_used": is_used,
-                    "x": x,
-                    "y": y,
+                    "orientations": orientation_vars,
                     "original_shape": shape,
                 }
             )
@@ -166,47 +267,54 @@ class PackingSolver:
         allowed_indices = [(r * self.board_width + c,) for r, c in allowed_cells_set]
 
         for s in self.shape_vars:
-            occupied_cells = []
-            for p_dx, p_dy in s["points"]:
-                cell_var = self.model.NewIntVar(
-                    0, self.board_height * self.board_width - 1, f"cell_{s['id']}_{p_dx}_{p_dy}"
-                )
-                self.model.Add(cell_var == (s["y"] + p_dy) * self.board_width + (s["x"] + p_dx))
-                occupied_cells.append(cell_var)
+            for orientation in s["orientations"]:
+                occupied_cells = []
+                for p_dx, p_dy in orientation["points"]:
+                    cell_var = self.model.NewIntVar(
+                        0,
+                        self.board_height * self.board_width - 1,
+                        f"cell_{s['id']}_{orientation['rotation']}_{p_dx}_{p_dy}",
+                    )
+                    self.model.Add(
+                        cell_var == (orientation["y"] + p_dy) * self.board_width + (orientation["x"] + p_dx)
+                    )
+                    occupied_cells.append(cell_var)
 
-            for cell in occupied_cells:
-                self.model.AddAllowedAssignments([cell], allowed_indices).OnlyEnforceIf(s["is_used"])
+                for cell in occupied_cells:
+                    self.model.AddAllowedAssignments([cell], allowed_indices).OnlyEnforceIf(orientation["is_used"])
 
         # 不重叠约束
         all_x_intervals = []
         all_y_intervals = []
         for s in self.shape_vars:
-            rectangles = self.decomposed_shapes[s["name"]]
-            for k, rect in enumerate(rectangles):
-                rect_dx, rect_dy, rect_w, rect_h = rect
+            for orientation in s["orientations"]:
+                for k, rect in enumerate(orientation["rectangles"]):
+                    rect_dx, rect_dy, rect_w, rect_h = rect
+                    suffix = f"{s['id']}_{orientation['rotation']}_{k}"
 
-                x_start = self.model.NewIntVar(0, self.board_width, f"x_start_{s['id']}_{k}")
-                x_end = self.model.NewIntVar(0, self.board_width, f"x_end_{s['id']}_{k}")
-                self.model.Add(x_start == s["x"] + rect_dx)
-                self.model.Add(x_end == x_start + rect_w)
-                x_interval = self.model.NewOptionalIntervalVar(
-                    x_start, rect_w, x_end, s["is_used"], f"x_interval_{s['id']}_{k}"
-                )
+                    x_start = self.model.NewIntVar(0, self.board_width, f"x_start_{suffix}")
+                    x_end = self.model.NewIntVar(0, self.board_width, f"x_end_{suffix}")
+                    self.model.Add(x_start == orientation["x"] + rect_dx)
+                    self.model.Add(x_end == x_start + rect_w)
+                    x_interval = self.model.NewOptionalIntervalVar(
+                        x_start, rect_w, x_end, orientation["is_used"], f"x_interval_{suffix}"
+                    )
 
-                y_start = self.model.NewIntVar(0, self.board_height, f"y_start_{s['id']}_{k}")
-                y_end = self.model.NewIntVar(0, self.board_height, f"y_end_{s['id']}_{k}")
-                self.model.Add(y_start == s["y"] + rect_dy)
-                self.model.Add(y_end == y_start + rect_h)
-                y_interval = self.model.NewOptionalIntervalVar(
-                    y_start, rect_h, y_end, s["is_used"], f"y_interval_{s['id']}_{k}"
-                )
+                    y_start = self.model.NewIntVar(0, self.board_height, f"y_start_{suffix}")
+                    y_end = self.model.NewIntVar(0, self.board_height, f"y_end_{suffix}")
+                    self.model.Add(y_start == orientation["y"] + rect_dy)
+                    self.model.Add(y_end == y_start + rect_h)
+                    y_interval = self.model.NewOptionalIntervalVar(
+                        y_start, rect_h, y_end, orientation["is_used"], f"y_interval_{suffix}"
+                    )
 
-                all_x_intervals.append(x_interval)
-                all_y_intervals.append(y_interval)
+                    all_x_intervals.append(x_interval)
+                    all_y_intervals.append(y_interval)
 
-        self.model.AddNoOverlap2D(all_x_intervals, all_y_intervals)
+        if all_x_intervals:
+            self.model.AddNoOverlap2D(all_x_intervals, all_y_intervals)
 
-        # 对称性破坏
+        # 对称性破坏：同名重复形状优先使用前面的实例，减少等价搜索分支。
         grouped_shapes = defaultdict(list)
         for s in self.shape_vars:
             grouped_shapes[s["name"]].append(s)
@@ -216,7 +324,7 @@ class PackingSolver:
                 for i in range(len(instances) - 1):
                     s1 = instances[i]
                     s2 = instances[i + 1]
-                    self.model.Add(s1["x"] <= s2["x"]).OnlyEnforceIf([s1["is_used"], s2["is_used"]])
+                    self.model.Add(s1["is_used"] >= s2["is_used"])
 
     def _set_objective(self):
         """设置优化目标。"""
@@ -232,7 +340,7 @@ class PackingSolver:
             cp_model.FEASIBLE: PackingStatus.FEASIBLE,
             cp_model.INFEASIBLE: PackingStatus.INFEASIBLE,
             cp_model.UNKNOWN: PackingStatus.UNKNOWN,
-            cp_model.MODEL_INVALID: PackingStatus.MODEL_INVALID,
+            cp_model.MODEL_INVALID: PackingStatus.UNKNOWN,
         }
         packing_status = status_map.get(status, PackingStatus.UNKNOWN)
 
@@ -250,6 +358,7 @@ class PackingSolver:
                     y=ps["y"],
                     points=ps["points"],
                     color=ps["color"],
+                    rotation=ps.get("rotation", 0),
                 )
                 for ps in callback.solution["placed_shapes"]
             ]
@@ -284,7 +393,7 @@ def solve_packing(
             name=shape_dict["name"],
             points=shape_dict["points"],
             color=shape_dict["color"],
-            area=len(shape_dict["points"]),
+            area=shape_dict.get("area", len(shape_dict["points"])),
         )
         for shape_dict in shapes_to_pack
     ]
@@ -309,6 +418,7 @@ def solve_packing(
                     "position": (ps.x, ps.y),
                     "points": ps.points,
                     "color": ps.color,
+                    "rotation": ps.rotation,
                 }
             )
 

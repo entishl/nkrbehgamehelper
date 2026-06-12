@@ -5,9 +5,9 @@ from typing import List, Tuple
 
 @dataclass
 class Shape:
-    """Represents a single shape with its name and matrix representation."""
+    """Represents a single shape with its name and occupied points."""
     name: str
-    points: List[List[int]]
+    points: List[Tuple[int, int]]
     area: int
     color: str
 
@@ -17,41 +17,33 @@ class Rectangle:
     """Represents a rectangle with its dimensions."""
     width: int
     height: int
+    x_offset: int
+    y_offset: int
 
 
 @dataclass
 class PlacedShape:
-    """Represents a shape that has been placed on the grid."""
+    """Represents a shape placed on the board."""
     name: str
     x: int
     y: int
     points: List[Tuple[int, int]]
     color: str
+    rotation: int = 0
 
 
 class PackingStatus(Enum):
-    """Represents the status of a packing operation."""
-
+    """The status of the packing solution."""
     OPTIMAL = auto()
-    """An optimal solution was found."""
-
     FEASIBLE = auto()
-    """A feasible solution was found, but it is not necessarily optimal."""
-
     INFEASIBLE = auto()
-    """The model was proven to be infeasible."""
-
     UNKNOWN = auto()
-    """The solver stopped before proving feasibility or infeasibility."""
-
-    MODEL_INVALID = auto()
-    """The model is invalid."""
 
 
 @dataclass
 class PackingResult:
-    """Represents the result of a packing operation."""
-    board_size: Tuple[int, int]
-    status: PackingStatus
+    """The result of a packing attempt."""
     placed_shapes: List[PlacedShape] = field(default_factory=list)
     unplaced_shapes: List[str] = field(default_factory=list)
+    board_size: Tuple[int, int] = (0, 0)
+    status: PackingStatus = PackingStatus.UNKNOWN
