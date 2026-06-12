@@ -15,6 +15,52 @@ from src.visualizer import ResultVisualizer
 GRID_WIDTH = 9
 GRID_HEIGHT = 9
 
+class ScrollableFrame(ttk.Frame):
+    """自定义的可滚动 Frame，支持鼠标滚轮和自适应宽度"""
+    def __init__(self, container, *args, **kwargs):
+        super().__init__(container, *args, **kwargs)
+        
+        # 自动获取 ttk Frame 的背景色，使 Canvas 完美融合
+        bg_color = self.tk.call("ttk::style", "lookup", "TFrame", "-background")
+        
+        self.canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0, bg=bg_color)
+        self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.scrollable_frame = ttk.Frame(self.canvas)
+
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(
+                scrollregion=self.canvas.bbox("all")
+            )
+        )
+
+        self.window_id = self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+
+        # 让内部 frame 的宽度与 canvas 保持一致，这样里面的 grid 能够自适应宽度
+        self.canvas.bind('<Configure>', self._on_canvas_configure)
+        
+        # 全局绑定鼠标滚轮事件
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+
+    def _on_canvas_configure(self, event):
+        self.canvas.itemconfig(self.window_id, width=event.width)
+
+    def _on_mousewheel(self, event):
+        # 检查触发滚轮事件的 widget 是否属于当前 Canvas 或其子代，避免冲突
+        widget = event.widget
+        while widget:
+            if widget == self.canvas:
+                self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+                break
+            try:
+                widget = self.nametowidget(widget.winfo_parent())
+            except Exception:
+                break
+
 
 class ShapePackingGUI(tk.Tk):
     def __init__(self):
@@ -34,9 +80,13 @@ class ShapePackingGUI(tk.Tk):
         main_frame = ttk.Frame(self)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # Top frame for input and output
+        # Bottom frame for controls (pack first at the bottom so it remains visible when resized)
+        bottom_frame = ttk.Frame(main_frame)
+        bottom_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(5, 0))
+
+        # Top frame for input and output (pack second to fill remaining space)
         top_frame = ttk.Frame(main_frame)
-        top_frame.pack(fill=tk.BOTH, expand=True)
+        top_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
         # Left frame for inputs
         left_frame = ttk.LabelFrame(top_frame, text="Input")
@@ -87,7 +137,11 @@ class ShapePackingGUI(tk.Tk):
         self.total_area_var = tk.StringVar(value="总面积: 0")
 
         # --- Shape Quantities ---
-        self.shapes_container_parent = left_frame
+        # 创建可滚动容器，使形状列表多时可以使用滚动条
+        self.shapes_scrollable_container = ScrollableFrame(left_frame)
+        self.shapes_scrollable_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        self.shapes_container_parent = self.shapes_scrollable_container.scrollable_frame
         self.load_shapes(self.shapes_container_parent)
 
         total_area_label = ttk.Label(
@@ -125,9 +179,7 @@ class ShapePackingGUI(tk.Tk):
         self.current_unplaced_shapes = []
         self.current_allowed_cells = []
 
-        # Bottom frame for controls
-        bottom_frame = ttk.Frame(main_frame)
-        bottom_frame.pack(fill=tk.X, pady=(5, 0))
+        # Bottom frame for controls is already packed at the top of __init__
 
         # Calculate button
         self.calculate_button = ttk.Button(
