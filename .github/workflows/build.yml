@@ -30,6 +30,10 @@ jobs:
       run: |
         pyinstaller --clean --noconfirm gui.spec
 
+    - name: Compress Build Directory
+      run: |
+        Compress-Archive -Path dist/gui -DestinationPath dist/gui.zip
+
     - name: List dist artifacts
       if: always()
       run: |
@@ -44,4 +48,4 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        files: dist/gui.exe
+        files: dist/gui.zip

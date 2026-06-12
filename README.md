@@ -38,8 +38,7 @@ pip install ortools
 pyinstaller gui.spec
 ```
 
-如需以后可以自行修改shapes.json，以实现自定义形状。
-可自行取消`gui.spec`最后一段的注释，以文件夹方式打包。
+打包完成后，会在 `dist/gui` 文件夹下生成可执行文件以及相关的配置文件（包括 `shapes.json`）。您可以直接在打包好的 `dist/gui` 目录下修改 `shapes.json` 来实现自定义形状的读取与保存，分发时只需将整个 `dist/gui` 文件夹进行压缩打包即可。
 
 ## 如何使用
 

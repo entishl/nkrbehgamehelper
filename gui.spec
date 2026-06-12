@@ -29,9 +29,8 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='gui',
     debug=False,
     bootloader_ignore_signals=False,
@@ -50,15 +49,14 @@ exe = EXE(
 
 # COLLECT 用于创建多文件（文件夹）模式的打包。
 # 它将可执行文件、二进制文件和数据文件收集到一个名为 'gui' 的文件夹中。
-# 为了切换到单文件可执行模式，此部分被注释掉。
-# 如果要实现多文件打包，以方便直接修改 shapes.json 文件设置，可将以下代码的注释取消。
-# 之后可直接修改 internal/shapes.json 以适配其他情况的求解。
-# coll = COLLECT(
-#     exe,
-#     a.binaries,
-#     a.datas,
-#     strip=False,
-#     upx=True,
-#     upx_exclude=[],
-#     name='gui',
-# )
+# 打包后，您可以直接修改打包文件夹目录下的 shapes.json 文件。
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='gui',
+)
+

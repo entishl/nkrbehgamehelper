@@ -41,8 +41,7 @@ jobs:
       run: >
         python -m nuitka
         --clang
-        --onefile
-        --onefile-no-compression
+        --standalone
         --assume-yes-for-downloads
         --msvc=latest
         --output-dir=dist
@@ -52,8 +51,12 @@ jobs:
         ${{ steps.dlls.outputs.include_args }}
         gui.py
 
+    - name: Compress Build Directory
+      run: Compress-Archive -Path dist/gui.dist -DestinationPath dist/gui.zip
+      shell: pwsh
+
     - name: Upload dist as artifact
       uses: actions/upload-artifact@v4
       with:
         name: nuitka-dist
-        path: dist/gui.exe
+        path: dist/gui.zip
