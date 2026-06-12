@@ -1,6 +1,6 @@
 import argparse
 import json
-from typing import List, Dict, Any, cast
+from typing import Any, Dict, List, Tuple, cast
 
 from src.data_models import Shape
 from src.solver import PackingSolver
@@ -65,7 +65,7 @@ def main() -> None:
                 shapes_to_pack.append(
                     Shape(
                         name=f"{name}_{i+1}",
-                        points=cast(List[List[int]], points),
+                        points=cast(List[Tuple[int, int]], points),
                         area=cast(int, area),
                         color=cast(str, color),
                     )
@@ -88,7 +88,7 @@ def main() -> None:
 
     print(f"Attempting to pack {len(shapes_to_pack)} shapes on a {board_size[0]}x{board_size[1]} board...")
 
-    allowed_cells = [(x, y) for x in range(width) for y in range(height)]
+    allowed_cells = [(row, col) for row in range(height) for col in range(width)]
     solver = PackingSolver(shapes_to_pack, board_size, allowed_cells=allowed_cells)
     result = solver.solve()
 
@@ -101,7 +101,7 @@ def main() -> None:
         # TODO: Add call to a text-based visualizer here
         # print_board(result.placed_shapes, board_size)
         for shape in result.placed_shapes:
-            print(f"  - {shape.name} at ({shape.x}, {shape.y})")
+            print(f"  - {shape.name} at ({shape.x}, {shape.y}), rotation={shape.rotation}°")
     else:
         print("\nCould not place any shapes.")
 
