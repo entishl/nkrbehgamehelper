@@ -1,4 +1,5 @@
 import tkinter as tk
+from tkinter import ttk
 
 GRID_WIDTH = 9
 GRID_HEIGHT = 9
@@ -7,11 +8,19 @@ GRID_HEIGHT = 9
 class ResultVisualizer:
     """Handles drawing the results of the shape packing on a canvas."""
 
-    def __init__(self, canvas: tk.Canvas):
+    def __init__(self, canvas: tk.Canvas, on_clear_unplaced=None):
         self.canvas = canvas
+        self.on_clear_unplaced = on_clear_unplaced
+        self.clear_button = None
 
     def clear_canvas(self):
         """Clears all items from the canvas."""
+        if hasattr(self, "clear_button") and self.clear_button:
+            try:
+                self.clear_button.destroy()
+            except Exception:
+                pass
+            self.clear_button = None
         self.canvas.delete("all")
 
     def _draw_container_background(self, allowed_cells, scale, y_offset=0):
@@ -78,11 +87,30 @@ class ResultVisualizer:
     def _draw_unplaced_shapes(self, unplaced_shapes, canvas_width, unplaced_area_y_start):
         """Draws the unplaced shapes in a separate area."""
         if not unplaced_shapes:
+            if hasattr(self, "clear_button") and self.clear_button:
+                try:
+                    self.clear_button.destroy()
+                except Exception:
+                    pass
+                self.clear_button = None
             return
 
         self.canvas.create_text(
             10, unplaced_area_y_start - 15, text="Unplaced Shapes:", anchor="nw", font=("Arial", 10, "bold")
         )
+
+        if self.on_clear_unplaced:
+            if hasattr(self, "clear_button") and self.clear_button:
+                try:
+                    self.clear_button.destroy()
+                except Exception:
+                    pass
+            self.clear_button = ttk.Button(
+                self.canvas,
+                text="清除(左侧数量会对应减少)",
+                command=self.on_clear_unplaced
+            )
+            self.canvas.create_window(140, unplaced_area_y_start - 15, window=self.clear_button, anchor="w")
 
         current_x = 10
         current_y = unplaced_area_y_start

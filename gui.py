@@ -67,6 +67,9 @@ class ShapePackingGUI(tk.Tk):
                 row_cells.append(canvas)
             self.container_grid_cells.append(row_cells)
 
+        # --- Board Area Display ---
+        self.board_area_var = tk.StringVar(value="棋盘总面积: 0")
+
         self.reset_container_grid()  # Set initial default state
 
         # --- Max Button ---
@@ -74,6 +77,11 @@ class ShapePackingGUI(tk.Tk):
             container_frame, text="Max", command=self.unlock_all_cells
         )
         max_button.grid(row=9, column=0, columnspan=9, pady=(5, 0))
+
+        board_area_label = ttk.Label(
+            container_frame, textvariable=self.board_area_var, font=("Arial", 10, "bold")
+        )
+        board_area_label.grid(row=10, column=0, columnspan=9, pady=(2, 5))
 
         # --- Total Area Display ---
         self.total_area_var = tk.StringVar(value="总面积: 0")
@@ -111,7 +119,11 @@ class ShapePackingGUI(tk.Tk):
         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
         self.result_canvas = tk.Canvas(right_frame, bg="white")
         self.result_canvas.pack(fill=tk.BOTH, expand=True)
-        self.visualizer = ResultVisualizer(self.result_canvas)
+        self.visualizer = ResultVisualizer(self.result_canvas, on_clear_unplaced=self.clear_unplaced_shapes)
+
+        self.current_result = None
+        self.current_unplaced_shapes = []
+        self.current_allowed_cells = []
 
         # Bottom frame for controls
         bottom_frame = ttk.Frame(main_frame)
@@ -229,7 +241,10 @@ class ShapePackingGUI(tk.Tk):
         """Resets the entire UI to its default state."""
         self.clear_shape_entries()
         self.reset_container_grid()
-        self.result_canvas.delete("all")
+        self.visualizer.clear_canvas()
+        self.current_result = None
+        self.current_unplaced_shapes = []
+        self.current_allowed_cells = []
         for lock_var in self.shape_lock_vars.values():
             lock_var.set(False)
         # Reset lock icon colors to default
@@ -371,6 +386,12 @@ class ShapePackingGUI(tk.Tk):
         if hasattr(self, "total_area_var"):
             self.total_area_var.set(f"总面积: {total_area}")
 
+    def _update_board_area(self):
+        """Calculates and updates the total area of the container board."""
+        board_area = sum(sum(row) for row in self.container_grid_status)
+        if hasattr(self, "board_area_var"):
+            self.board_area_var.set(f"棋盘总面积: {board_area}")
+
     def toggle_lock_state(self, shape_name):
         """Toggles the lock state for a given shape."""
         lock_var = self.shape_lock_vars[shape_name]
@@ -392,6 +413,7 @@ class ShapePackingGUI(tk.Tk):
         else:
             self.container_grid_status[r][c] = 1
             self.container_grid_cells[r][c].config(bg="white")
+        self._update_board_area()
 
     def unlock_all_cells(self):
         """Unlocks all cells in the container grid."""
@@ -399,6 +421,7 @@ class ShapePackingGUI(tk.Tk):
             for c in range(9):
                 self.container_grid_status[r][c] = 1
                 self.container_grid_cells[r][c].config(bg="white")
+        self._update_board_area()
 
     def reset_container_grid(self):
         """Resets the container grid to its default state."""
@@ -411,6 +434,7 @@ class ShapePackingGUI(tk.Tk):
                 else:
                     self.container_grid_status[r][c] = 0
                     self.container_grid_cells[r][c].config(bg="black")
+        self._update_board_area()
 
     def clear_shape_entries(self):
         """Resets all shape entry values to 0."""
@@ -547,6 +571,10 @@ class ShapePackingGUI(tk.Tk):
         """Updates the UI with the calculation result. Must be called from the main thread."""
         self.calculate_button.config(state=tk.NORMAL)
 
+        self.current_result = result
+        self.current_unplaced_shapes = unplaced_shapes
+        self.current_allowed_cells = allowed_cells
+
         # Check for infeasible solution with locked shapes
         if (
             result and result["status"] in ("INFEASIBLE", "NO_SOLUTION_FOUND")
@@ -578,6 +606,33 @@ class ShapePackingGUI(tk.Tk):
             status_text = status_map.get(result["status"], result["status"])
 
         self.visualizer.visualize(result, unplaced_shapes, allowed_cells, status_text)
+
+    def clear_unplaced_shapes(self):
+        """清除未放置的形状，扣除左侧输入框的数量，并刷新 UI"""
+        if not hasattr(self, "current_unplaced_shapes") or not self.current_unplaced_shapes:
+            return
+
+        # 统计每个未放置形状的名称和对应的数量
+        unplaced_counts = Counter(s["name"] for s in self.current_unplaced_shapes)
+
+        # 扣除左侧输入数量
+        for name, count in unplaced_counts.items():
+            if name in self.shape_entries:
+                entry = self.shape_entries[name]
+                try:
+                    val = int(entry.get())
+                    new_val = max(0, val - count)
+                    entry.delete(0, tk.END)
+                    entry.insert(0, str(new_val))
+                except ValueError:
+                    pass
+
+        # 更新总面积
+        self._update_total_area()
+
+        # 清空当前未放置形状列表并重新绘制 UI
+        self.current_unplaced_shapes = []
+        self.visualize_result(self.current_result, [], self.current_allowed_cells)
 
 
     def open_manage_shapes_dialog(self):
