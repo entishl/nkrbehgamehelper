@@ -164,6 +164,10 @@ export function solvePacking(
   let emptyCellsRemaining = boardArea;
   let remainingShapeArea = uniqueShapes.reduce((sum, s) => sum + s.area * s.count, 0);
   let mustRemaining = uniqueShapes.reduce((sum, s) => sum + (s.mustPlace ? s.count : 0), 0);
+  let mustRemainingArea = uniqueShapes.reduce(
+    (sum, s) => sum + (s.mustPlace ? s.area * s.count : 0),
+    0
+  );
 
   // 4. Precompute candidate placements for each anchor cell
   interface PlacementCandidate {
@@ -185,7 +189,7 @@ export function solvePacking(
     for (let ex = 0; ex < width; ex++) {
       const anchorIdx = ey * width + ex;
       
-      let isAnchorOccupied = false;
+      let isAnchorOccupied: boolean;
       if (anchorIdx < 32) isAnchorOccupied = (initOcc0 & (1 << anchorIdx)) !== 0;
       else if (anchorIdx < 64) isAnchorOccupied = (initOcc1 & (1 << (anchorIdx - 32))) !== 0;
       else isAnchorOccupied = (initOcc2 & (1 << (anchorIdx - 64))) !== 0;
@@ -211,7 +215,7 @@ export function solvePacking(
             }
             const targetIdx = cy * width + cx;
             
-            let isTargetOccupied = false;
+            let isTargetOccupied: boolean;
             if (targetIdx < 32) isTargetOccupied = (initOcc0 & (1 << targetIdx)) !== 0;
             else if (targetIdx < 64) isTargetOccupied = (initOcc1 & (1 << (targetIdx - 32))) !== 0;
             else isTargetOccupied = (initOcc2 & (1 << (targetIdx - 64))) !== 0;
@@ -270,8 +274,12 @@ export function solvePacking(
       return; // Cannot beat best Area
     }
 
+    if (mustRemainingArea > emptyCellsRemaining) {
+      return; // Cannot place all remaining must-place shapes
+    }
+
     // LSB O(1) scan: Find the first empty cell using bitmasks
-    let emptyIdx = 0;
+    let emptyIdx: number;
     if (o0 !== -1) {
       const val = ~o0;
       emptyIdx = 31 - Math.clz32(val & -val);
@@ -302,7 +310,10 @@ export function solvePacking(
         emptyCellsRemaining -= p.area;
         remainingShapeArea -= p.area;
         const shape = uniqueShapes[p.typeId];
-        if (shape.mustPlace) mustRemaining--;
+        if (shape.mustPlace) {
+          mustRemaining--;
+          mustRemainingArea -= p.area;
+        }
 
         currentPlacedList.push({
           name: shape.name,
@@ -318,7 +329,10 @@ export function solvePacking(
 
         // Backtrack other states
         currentPlacedList.pop();
-        if (shape.mustPlace) mustRemaining++;
+        if (shape.mustPlace) {
+          mustRemaining++;
+          mustRemainingArea += p.area;
+        }
         remainingShapeArea += p.area;
         emptyCellsRemaining += p.area;
         remainingCount[p.typeId]++;
