@@ -64,6 +64,12 @@ def generate_unique_orientations(points: List[Point], allow_rotation: bool = Tru
     return orientations
 
 
+def get_shape_signature(shape: Shape) -> Tuple[str, str, int, Tuple[Point, ...]]:
+    """Generate a unique signature for a shape to avoid incorrect grouping of same-named shapes."""
+    normalized = tuple(normalize_points([tuple(p) for p in shape.points]))
+    return (shape.name, shape.color, shape.area, normalized)
+
+
 def extract_solution_from_provider(shape_vars: List[Dict], value_provider) -> Tuple[List[PlacedShape], List[str]]:
     """从求解器或回调函数中提取放置结果。"""
     placed_shapes = []
@@ -434,10 +440,11 @@ class PackingSolver:
 
 
 
-        # 对称性破坏：同名重复形状优先使用前面的实例，减少等价搜索分支。
+        # 对称性破坏：完全相同的重复形状优先使用前面的实例，减少等价搜索分支。
         grouped_shapes = defaultdict(list)
         for s in self.shape_vars:
-            grouped_shapes[s["name"]].append(s)
+            sig = get_shape_signature(s["original_shape"])
+            grouped_shapes[sig].append(s)
 
         for instances in grouped_shapes.values():
             if len(instances) > 1:

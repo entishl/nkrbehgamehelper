@@ -63,6 +63,16 @@ export function generateUniqueOrientations(points: Point[], allowRotation: boole
   return orientations;
 }
 
+/**
+ * Generate a unique signature for a shape to avoid incorrect merging of same-named shapes with different geometries, colors, or areas.
+ */
+export function getShapeSignature(shape: Shape): string {
+  const normalized = normalizePoints(shape.points)
+    .map(([x, y]) => `${x},${y}`)
+    .join(';');
+  return `${shape.name}|${shape.color}|${shape.area}|${normalized}`;
+}
+
 interface UniquePreparedShape extends Shape {
   orientations: Orientation[];
   mustPlace: boolean;
@@ -124,10 +134,11 @@ export function solvePacking(
 
   // 3. Prepare unique shapes with counts
   const uniqueShapes: UniquePreparedShape[] = [];
-  const nameToUniqueIndex = new Map<string, number>();
+  const signatureToUniqueIndex = new Map<string, number>();
 
   for (const shape of shapesToPack) {
-    const idx = nameToUniqueIndex.get(shape.name);
+    const signature = getShapeSignature(shape);
+    const idx = signatureToUniqueIndex.get(signature);
     if (idx === undefined) {
       const orientations = generateUniqueOrientations(shape.points, allowRotation);
       const uniqueShape: UniquePreparedShape = {
@@ -140,7 +151,7 @@ export function solvePacking(
         count: 1,
       };
       uniqueShapes.push(uniqueShape);
-      nameToUniqueIndex.set(shape.name, uniqueShapes.length - 1);
+      signatureToUniqueIndex.set(signature, uniqueShapes.length - 1);
     } else {
       uniqueShapes[idx].count++;
     }

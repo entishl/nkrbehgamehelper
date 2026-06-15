@@ -154,6 +154,44 @@ class TestSolverRotation(unittest.TestCase):
         self.assertEqual(result.status, PackingStatus.OPTIMAL)
         self.assertEqual(len(result.placed_shapes), 2)
 
+    def test_same_name_different_shapes_symmetry(self):
+        """测试同名但不同形状的块在对称性剪枝时不会相互限制。"""
+        # 定义两个同名但大小不同的形状
+        # shape_1: 1x1 正方形，面积 1
+        shape_1 = Shape(
+            name="block",
+            points=[(0, 0)],
+            area=1,
+            color="#FF0000"
+        )
+        # shape_2: 2x2 正方形，面积 4
+        shape_2 = Shape(
+            name="block",
+            points=[(0, 0), (1, 0), (0, 1), (1, 1)],
+            area=4,
+            color="#00FF00"
+        )
+
+        # 2x2 棋盘
+        board_size = (2, 2)
+        allowed_cells = [(c, r) for r in range(2) for c in range(2)]
+
+        # 如果有对称性剪枝的 bug（仅按名称分组导致 s1.is_used >= s2.is_used），
+        # 那么由于无法同时容纳两者（总面积 5 > 4），
+        # 如果不放 1x1 则也无法放 2x2。这将导致最大放置面积为 1。
+        # 修复后应能单独放置 2x2 的块，达到最大面积 4。
+        solver = PackingSolver(
+            shapes_to_pack=[shape_1, shape_2],
+            board_size=board_size,
+            allowed_cells=allowed_cells,
+        )
+        result = solver.solve()
+
+        self.assertEqual(result.status, PackingStatus.OPTIMAL)
+        self.assertEqual(len(result.placed_shapes), 1)
+        self.assertEqual(len(result.placed_shapes[0].points), 4)
+        self.assertEqual(result.placed_shapes[0].color, "#00FF00")
+
 
 if __name__ == "__main__":
     unittest.main()
