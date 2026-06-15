@@ -105,7 +105,7 @@ def extract_solution_from_provider(shape_vars: List[Dict], value_provider) -> Tu
 
 class SolutionCallback(CpSolverSolutionCallback):
     """
-    一个回调类，用于在找到满足特定条件的解时提前停止搜索。
+    一个轻量级回调类，仅用于记录最佳面积并在找到完美解时提前停止搜索。
     """
 
     def __init__(self, shape_vars, board_area, total_shapes_count, strategy):
@@ -114,34 +114,30 @@ class SolutionCallback(CpSolverSolutionCallback):
         self._board_area = board_area
         self._total_shapes_count = total_shapes_count
         self._strategy = strategy
-        self.solution = None
-        self._best_objective_value = -1  # 用于记录找到的最佳目标值
+        self.best_area = -1
 
     def on_solution_callback(self):
-        """在每次找到可行解时被调用。"""
-        placed_shapes_count = sum(self.Value(s["is_used"]) for s in self._shape_vars)
-        current_area = sum(s["area"] * self.Value(s["is_used"]) for s in self._shape_vars)
+        """在每次找到可行解时被调用。保持极其轻量以避免阻塞求解线程。"""
+        placed_count = 0
+        area = 0
 
-        # 仅当当前解更优时，才保存它
-        if current_area > self._best_objective_value:
-            self._best_objective_value = current_area
-            print(f"找到更优解: 面积 = {current_area}。已保存。")
-            placed_shapes, unplaced_shapes = extract_solution_from_provider(self._shape_vars, self)
-            self.solution = {
-                "placed_shapes": placed_shapes,
-                "unplaced_shapes": unplaced_shapes,
-            }
+        for s in self._shape_vars:
+            used = self.Value(s["is_used"])
+            placed_count += used
+            area += s["area"] * used
+
+        if area > self.best_area:
+            self.best_area = area
+            print(f"找到更优解: 面积 = {area}。")
 
         # 检查是否达成了“完美解”并提前停止
-        if self._strategy == "P0":  # 策略：装下所有形状
-            if placed_shapes_count == self._total_shapes_count:
-                print("完美解达成 (P0): 所有形状已装入。停止搜索。")
-                self.StopSearch()
+        if self._strategy == "P0" and placed_count == self._total_shapes_count:
+            print("完美解达成 (P0): 所有形状已装入。停止搜索。")
+            self.StopSearch()
 
-        elif self._strategy == "P1":  # 策略：占满棋盘
-            if current_area == self._board_area:
-                print("完美解达成 (P1): 棋盘已占满。停止搜索。")
-                self.StopSearch()
+        elif self._strategy == "P1" and area == self._board_area:
+            print("完美解达成 (P1): 棋盘已占满。停止搜索。")
+            self.StopSearch()
 
 
 class PackingSolver:
@@ -461,18 +457,15 @@ class PackingSolver:
         }
         packing_status = status_map.get(status, PackingStatus.UNKNOWN)
 
-        placed_shapes = []
-        unplaced_shape_names = [s.name for s in self.shapes_to_pack]
-
-        # --- 步骤 8: 调整以适应回调函数 ---
-        # 如果回调函数找到了一个解（无论是完美的还是最后的），使用它
-        if callback.solution:
-            print("从回调函数中处理解决方案。")
-            placed_shapes = callback.solution["placed_shapes"]
-            unplaced_shape_names = callback.solution["unplaced_shapes"]
-        # 如果没有找到解 (INFEASIBLE)
-        elif status == cp_model.INFEASIBLE:
-            print("未找到可行解。")
+        # 只要状态为 OPTIMAL 或 FEASIBLE，就直接从 solver 中提取最终最优解
+        if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            print("从求解器中提取最终最佳解决方案。")
+            placed_shapes, unplaced_shape_names = extract_solution_from_provider(
+                self.shape_vars, solver
+            )
+        else:
+            if status == cp_model.INFEASIBLE:
+                print("未找到可行解。")
             placed_shapes = []
             unplaced_shape_names = [s.name for s in self.shapes_to_pack]
 
