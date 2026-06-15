@@ -157,6 +157,15 @@ class PackingSolver:
         self.model = cp_model.CpModel()
         self.shape_vars: List[Dict] = []
         self.orientation_cache: Dict[Tuple[Point, ...], List[Dict]] = {}
+        self.allowed_cells_set = {tuple(cell) for cell in self.allowed_cells} if self.allowed_cells else set()
+
+    def _valid_positions_for_orientation(self, points: List[Point], width: int, height: int) -> List[Tuple[int, int]]:
+        valid = []
+        for x in range(self.board_width - width + 1):
+            for y in range(self.board_height - height + 1):
+                if all((y + dy, x + dx) in self.allowed_cells_set for dx, dy in points):
+                    valid.append((x, y))
+        return valid
 
     def solve(self) -> PackingResult:
         """
@@ -225,6 +234,15 @@ class PackingSolver:
                 if shape_width > self.board_width or shape_height > self.board_height:
                     continue
 
+                valid_positions = self._valid_positions_for_orientation(
+                    orientation_data["points"],
+                    shape_width,
+                    shape_height,
+                )
+
+                if not valid_positions:
+                    continue
+
                 orientation_is_used = self.model.NewBoolVar(f"is_used_{i}_rot_{orientation_data['rotation']}")
                 x = self.model.NewIntVar(0, self.board_width - shape_width, f"x_{i}_rot_{orientation_data['rotation']}")
                 y = self.model.NewIntVar(0, self.board_height - shape_height, f"y_{i}_rot_{orientation_data['rotation']}")
@@ -239,6 +257,7 @@ class PackingSolver:
                         "is_used": orientation_is_used,
                         "x": x,
                         "y": y,
+                        "valid_positions": valid_positions,
                     }
                 )
 
@@ -267,26 +286,12 @@ class PackingSolver:
                 if s["name"] in self.must_place_names:
                     self.model.Add(s["is_used"] == 1)
 
-        # 单元格必须在允许的范围内
-        allowed_cells_set = {tuple(cell) for cell in self.allowed_cells}
-        allowed_indices = [(r * self.board_width + c,) for r, c in allowed_cells_set]
-
         for s in self.shape_vars:
             for orientation in s["orientations"]:
-                occupied_cells = []
-                for p_dx, p_dy in orientation["points"]:
-                    cell_var = self.model.NewIntVar(
-                        0,
-                        self.board_height * self.board_width - 1,
-                        f"cell_{s['id']}_{orientation['rotation']}_{p_dx}_{p_dy}",
-                    )
-                    self.model.Add(
-                        cell_var == (orientation["y"] + p_dy) * self.board_width + (orientation["x"] + p_dx)
-                    )
-                    occupied_cells.append(cell_var)
-
-                for cell in occupied_cells:
-                    self.model.AddAllowedAssignments([cell], allowed_indices).OnlyEnforceIf(orientation["is_used"])
+                self.model.AddAllowedAssignments(
+                    [orientation["x"], orientation["y"]],
+                    orientation["valid_positions"],
+                ).OnlyEnforceIf(orientation["is_used"])
 
         # 不重叠约束
         all_x_intervals = []
