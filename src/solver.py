@@ -74,21 +74,23 @@ def extract_solution_from_provider(shape_vars: List[Dict], value_provider) -> Tu
             continue
 
         selected_orientation = None
+        x, y = 0, 0
+        
+        # 扫描每个 orientation 的 placements 找到哪个 b_pos == True
+        found = False
         for orientation in s["orientations"]:
-            if value_provider.Value(orientation["is_used"]):
-                selected_orientation = orientation
+            for b_pos, px, py in orientation["placements"]:
+                if value_provider.Value(b_pos):
+                    x, y = px, py
+                    selected_orientation = orientation
+                    found = True
+                    break
+            if found:
                 break
 
         if selected_orientation is None:
             unplaced_shapes.append(s["original_shape"].name)
             continue
-
-        # Find the specific placement that was selected
-        x, y = 0, 0
-        for b_pos, px, py in selected_orientation["placements"]:
-            if value_provider.Value(b_pos):
-                x, y = px, py
-                break
 
         placed_shapes.append(
             PlacedShape(
@@ -221,7 +223,9 @@ class PackingSolver:
             self.model = cp_model.CpModel()
             self.shape_vars = []
             self._create_variables()
-            self._add_constraints()
+            
+            require_full_cover = (strategy == "P0" and total_shape_area == board_area) or strategy == "P1"
+            self._add_constraints(require_full_cover=require_full_cover)
 
             # 强加完美解的强制约束
             if strategy == "P0":
@@ -230,11 +234,6 @@ class PackingSolver:
             else:  # P1
                 total_area = sum(s["area"] * s["is_used"] for s in self.shape_vars)
                 self.model.Add(total_area == board_area)
-                
-            # ---- 新增：精确覆盖的强制全网格覆盖约束 ----
-            if (strategy == "P0" and total_shape_area == board_area) or strategy == "P1":
-                for c_var in self.cell_covered_vars.values():
-                    self.model.Add(c_var == 1)
             # ------------------------------------------
 
             # 不设 Objective
@@ -243,7 +242,7 @@ class PackingSolver:
             solver.parameters.num_search_workers = num_workers
             print(f"第一阶段求解器将使用 {num_workers} 个逻辑核心。")
 
-            status = solver.Solve(self.model)
+            status = solver.solve(self.model)
 
             if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
                 print("阶段 1 成功：找到完美解！")
@@ -281,7 +280,7 @@ class PackingSolver:
         solution_callback = SolutionCallback(
             self.shape_vars, board_area, len(self.shapes_to_pack), strategy
         )
-        status = solver.Solve(self.model, solution_callback)
+        status = solver.solve(self.model, solution_callback)
 
         return self._process_solution(solver, status, solution_callback)
 
@@ -330,6 +329,7 @@ class PackingSolver:
         for i, shape in enumerate(self.shapes_to_pack):
             is_used = self.model.NewBoolVar(f"is_used_{i}")
             orientation_vars = []
+            shape_placement_bools = []
 
             for j, orientation_data in enumerate(self._get_shape_orientations(shape)):
                 shape_width = orientation_data["width"]
@@ -368,15 +368,12 @@ class PackingSolver:
                 if not valid_positions:
                     continue
 
-                orientation_is_used = self.model.NewBoolVar(f"is_used_{i}_rot_{orientation_data['rotation']}")
-
                 # 为这个朝向的每个合法位置创建一个布尔变量 (Boolean Grid Model)
-                placement_bools = []
                 placements = []
                 
                 for px, py in valid_positions:
                     b_pos = self.model.NewBoolVar(f"pos_{i}_rot_{orientation_data['rotation']}_{px}_{py}")
-                    placement_bools.append(b_pos)
+                    shape_placement_bools.append(b_pos)
                     placements.append((b_pos, px, py))
                     
                     # 将这个摆法添加到它覆盖的格子列表中
@@ -385,23 +382,19 @@ class PackingSolver:
                         if (cx, cy) in self.cell_to_placement_vars:
                             self.cell_to_placement_vars[(cx, cy)].append(b_pos)
 
-                # 将位置布尔变量与兼容旧 API 的整数变量关联
-                self.model.Add(orientation_is_used == sum(placement_bools))
-
                 orientation_vars.append(
                     {
                         "rotation": orientation_data["rotation"],
                         "points": orientation_data["points"],
                         "width": shape_width,
                         "height": shape_height,
-                        "is_used": orientation_is_used,
                         "placements": placements,
                         "valid_positions": valid_positions,
                     }
                 )
 
-            if orientation_vars:
-                self.model.Add(sum(o["is_used"] for o in orientation_vars) == is_used)
+            if shape_placement_bools:
+                self.model.Add(is_used == sum(shape_placement_bools))
             else:
                 self.model.Add(is_used == 0)
 
@@ -417,7 +410,7 @@ class PackingSolver:
                 }
             )
 
-    def _add_constraints(self):
+    def _add_constraints(self, require_full_cover: bool = False):
         """向模型添加约束。"""
         # 必须放置的形状
         if self.must_place_names:
@@ -426,20 +419,18 @@ class PackingSolver:
                     self.model.Add(s["is_used"] == 1)
 
         # --- 新的不重叠约束 (基于布尔网格) ---
-        self.cell_covered_vars = {}
         for cell, pos_vars in self.cell_to_placement_vars.items():
-            if pos_vars:
-                # 每个格子最多被一个形状的一个位置覆盖
-                self.model.AddAtMostOne(pos_vars)
-                # 定义 CellCovered 布尔变量 (用于死角预防和完整覆盖验证)
-                c_var = self.model.NewBoolVar(f"cell_covered_{cell[0]}_{cell[1]}")
-                self.model.Add(c_var == sum(pos_vars))
-                self.cell_covered_vars[cell] = c_var
+            if require_full_cover:
+                if pos_vars:
+                    # 每个格子必须被恰好一个形状的一个位置覆盖
+                    self.model.AddExactlyOne(pos_vars)
+                else:
+                    # 没有任何形状可以覆盖到这个格子，但在 full cover 要求下必须被覆盖，因此无解
+                    self.model.Add(0 == 1)
             else:
-                # 没有任何形状可以覆盖到这个格子
-                c_var = self.model.NewBoolVar(f"cell_covered_{cell[0]}_{cell[1]}")
-                self.model.Add(c_var == 0)
-                self.cell_covered_vars[cell] = c_var
+                if len(pos_vars) > 1:
+                    # 每个格子最多被一个形状的一个位置覆盖
+                    self.model.AddAtMostOne(pos_vars)
 
 
 
