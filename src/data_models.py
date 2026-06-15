@@ -13,15 +13,6 @@ class Shape:
 
 
 @dataclass
-class Rectangle:
-    """Represents a rectangle with its dimensions."""
-    width: int
-    height: int
-    x_offset: int
-    y_offset: int
-
-
-@dataclass
 class PlacedShape:
     """Represents a shape placed on the board."""
     name: str

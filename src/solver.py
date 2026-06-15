@@ -5,7 +5,6 @@ from ortools.sat.python.cp_model import CpSolverSolutionCallback
 from typing import Dict, List, Optional, Tuple
 
 from .data_models import Shape, PlacedShape, PackingResult, PackingStatus
-from .decomposition import decompose_shape_to_rectangles
 
 Point = Tuple[int, int]
 
@@ -59,7 +58,6 @@ def generate_unique_orientations(points: List[Point], allow_rotation: bool = Tru
                 "points": rotated_points,
                 "width": width,
                 "height": height,
-                "rectangles": decompose_shape_to_rectangles(rotated_points),
             }
         )
 
@@ -382,7 +380,6 @@ class PackingSolver:
                     {
                         "rotation": orientation_data["rotation"],
                         "points": orientation_data["points"],
-                        "rectangles": orientation_data["rectangles"],
                         "width": shape_width,
                         "height": shape_height,
                         "is_used": orientation_is_used,
