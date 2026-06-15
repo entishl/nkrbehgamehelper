@@ -155,9 +155,9 @@ export function solvePacking(
 
   let bestArea = 0;
   let bestPlaced: CurrentPlaced[] = [];
-  const startTime = Date.now();
-  const timeLimitMs = timeLimitSec * 1000;
+  const deadline = performance.now() + timeLimitSec * 1000;
   let isTimedOut = false;
+  let nodeCount = 0;
 
   const currentPlacedList: CurrentPlaced[] = [];
   const remainingCount = uniqueShapes.map((s) => s.count);
@@ -247,7 +247,7 @@ export function solvePacking(
   }
 
   function dfs(currentArea: number, o0: number, o1: number, o2: number) {
-    if (Date.now() - startTime > timeLimitMs) {
+    if ((++nodeCount & 1023) === 0 && performance.now() > deadline) {
       isTimedOut = true;
       return;
     }
