@@ -66,6 +66,38 @@ def generate_unique_orientations(points: List[Point], allow_rotation: bool = Tru
     return orientations
 
 
+def extract_solution_from_provider(shape_vars: List[Dict], value_provider) -> Tuple[List[PlacedShape], List[str]]:
+    """从求解器或回调函数中提取放置结果。"""
+    placed_shapes = []
+    unplaced_shapes = []
+    for s in shape_vars:
+        if not value_provider.Value(s["is_used"]):
+            unplaced_shapes.append(s["original_shape"].name)
+            continue
+
+        selected_orientation = None
+        for orientation in s["orientations"]:
+            if value_provider.Value(orientation["is_used"]):
+                selected_orientation = orientation
+                break
+
+        if selected_orientation is None:
+            unplaced_shapes.append(s["original_shape"].name)
+            continue
+
+        placed_shapes.append(
+            PlacedShape(
+                name=s["name"],
+                x=value_provider.Value(selected_orientation["x"]),
+                y=value_provider.Value(selected_orientation["y"]),
+                points=selected_orientation["points"],
+                color=s["color"],
+                rotation=selected_orientation["rotation"],
+            )
+        )
+    return placed_shapes, unplaced_shapes
+
+
 class SolutionCallback(CpSolverSolutionCallback):
     """
     一个回调类，用于在找到满足特定条件的解时提前停止搜索。
@@ -89,36 +121,10 @@ class SolutionCallback(CpSolverSolutionCallback):
         if current_area > self._best_objective_value:
             self._best_objective_value = current_area
             print(f"找到更优解: 面积 = {current_area}。已保存。")
-            placed_shapes = []
-            for s in self._shape_vars:
-                if not self.Value(s["is_used"]):
-                    continue
-
-                selected_orientation = None
-                for orientation in s["orientations"]:
-                    if self.Value(orientation["is_used"]):
-                        selected_orientation = orientation
-                        break
-
-                if selected_orientation is None:
-                    continue
-
-                placed_shapes.append(
-                    {
-                        "name": s["name"],
-                        "x": self.Value(selected_orientation["x"]),
-                        "y": self.Value(selected_orientation["y"]),
-                        "points": selected_orientation["points"],
-                        "color": s["color"],
-                        "rotation": selected_orientation["rotation"],
-                    }
-                )
-
+            placed_shapes, unplaced_shapes = extract_solution_from_provider(self._shape_vars, self)
             self.solution = {
                 "placed_shapes": placed_shapes,
-                "unplaced_shapes": [
-                    s["original_shape"].name for s in self._shape_vars if not self.Value(s["is_used"])
-                ],
+                "unplaced_shapes": unplaced_shapes,
             }
 
         # 检查是否达成了“完美解”并提前停止
@@ -181,25 +187,81 @@ class PackingSolver:
             )
 
         self._prepare_data()
-        self._create_variables()
-        self._add_constraints()
-        self._set_objective()
 
-        # --- 步骤 5: 预处理和策略选择 ---
+        # 确定策略
         total_shape_area = sum(s.area for s in self.shapes_to_pack)
         board_area = len(self.allowed_cells)
         strategy = "P0" if total_shape_area <= board_area else "P1"
         print(f"预处理: 形状总面积={total_shape_area}, 棋盘面积={board_area}. 采用策略: {strategy}")
 
-        solver = cp_model.CpSolver()
-        solver.parameters.max_time_in_seconds = self.time_limit_sec
-
+        # 计算线程数
         num_cores = os.cpu_count() or 1
         num_workers = max(1, num_cores // 2)
-        solver.parameters.num_search_workers = num_workers
-        print(f"求解器将使用 {num_workers} (共 {num_cores} 个逻辑核心)。")
 
-        # --- 步骤 6 & 7: 实例化回调并求解 ---
+        # ==========================================
+        # 阶段 1: 尝试寻找完美解 (Feasibility Pass)
+        # ==========================================
+        # 设定一个较短的超时时间，例如最长 2 秒且不超过总时间限制的一半
+        feasibility_time_limit = min(2, self.time_limit_sec // 2)
+
+        if feasibility_time_limit > 0:
+            print(f"--- 阶段 1: 尝试寻找完美解 (限时 {feasibility_time_limit} 秒) ---")
+
+            # 构建阶段 1 的临时模型
+            self.model = cp_model.CpModel()
+            self.shape_vars = []
+            self._create_variables()
+            self._add_constraints()
+
+            # 强加完美解的强制约束
+            if strategy == "P0":
+                for s in self.shape_vars:
+                    self.model.Add(s["is_used"] == 1)
+            else:  # P1
+                total_area = sum(s["area"] * s["is_used"] for s in self.shape_vars)
+                self.model.Add(total_area == board_area)
+
+            # 不设 Objective
+            solver = cp_model.CpSolver()
+            solver.parameters.max_time_in_seconds = feasibility_time_limit
+            solver.parameters.num_search_workers = num_workers
+            print(f"第一阶段求解器将使用 {num_workers} 个逻辑核心。")
+
+            status = solver.Solve(self.model)
+
+            if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+                print("阶段 1 成功：找到完美解！")
+                placed_shapes, unplaced_shape_names = extract_solution_from_provider(self.shape_vars, solver)
+                status_map = {
+                    cp_model.OPTIMAL: PackingStatus.OPTIMAL,
+                    cp_model.FEASIBLE: PackingStatus.FEASIBLE,
+                }
+                return PackingResult(
+                    placed_shapes=placed_shapes,
+                    unplaced_shapes=unplaced_shape_names,
+                    board_size=(self.board_width, self.board_height),
+                    status=status_map.get(status, PackingStatus.FEASIBLE),
+                )
+
+            print("阶段 1 未能在限制时间内找到完美解或已确定无完美解。")
+
+        # ==========================================
+        # 阶段 2: 标准的最大化面积优化求解
+        # ==========================================
+        print(f"--- 阶段 2: 最大化面积优化 (限时 {self.time_limit_sec} 秒) ---")
+
+        # 重置并重新构建模型
+        self.model = cp_model.CpModel()
+        self.shape_vars = []
+        self._create_variables()
+        self._add_constraints()
+        self._set_objective()
+
+        solver = cp_model.CpSolver()
+        solver.parameters.max_time_in_seconds = self.time_limit_sec
+        solver.parameters.num_search_workers = num_workers
+        print(f"第二阶段求解器将使用 {num_workers} 个逻辑核心。")
+
         solution_callback = SolutionCallback(
             self.shape_vars, board_area, len(self.shapes_to_pack), strategy
         )
@@ -365,17 +427,7 @@ class PackingSolver:
         # 如果回调函数找到了一个解（无论是完美的还是最后的），使用它
         if callback.solution:
             print("从回调函数中处理解决方案。")
-            placed_shapes = [
-                PlacedShape(
-                    name=ps["name"],
-                    x=ps["x"],
-                    y=ps["y"],
-                    points=ps["points"],
-                    color=ps["color"],
-                    rotation=ps.get("rotation", 0),
-                )
-                for ps in callback.solution["placed_shapes"]
-            ]
+            placed_shapes = callback.solution["placed_shapes"]
             unplaced_shape_names = callback.solution["unplaced_shapes"]
         # 如果没有找到解 (INFEASIBLE)
         elif status == cp_model.INFEASIBLE:
