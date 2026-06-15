@@ -163,7 +163,7 @@ class PackingSolver:
         valid = []
         for x in range(self.board_width - width + 1):
             for y in range(self.board_height - height + 1):
-                if all((y + dy, x + dx) in self.allowed_cells_set for dx, dy in points):
+                if all((x + dx, y + dy) in self.allowed_cells_set for dx, dy in points):
                     valid.append((x, y))
         return valid
 

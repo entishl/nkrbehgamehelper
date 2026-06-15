@@ -568,7 +568,7 @@ class ShapePackingGUI(tk.Tk):
             for r in range(9):
                 for c in range(9):
                     if self.container_grid_status[r][c] == 1:
-                        allowed_cells.append((r, c))
+                        allowed_cells.append((c, r))
 
             if not allowed_cells:
                 self.after(0, self.update_ui_with_result, None, [], allowed_cells)

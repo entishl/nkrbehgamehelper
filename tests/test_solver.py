@@ -38,7 +38,7 @@ class TestSolverRotation(unittest.TestCase):
         # laser 形状默认宽度为 4，高度为 2。如果不允许旋转（或者旋转实现有误），则放不进 2x4 的棋盘。
         # 如果允许旋转，旋转 90 度或 270 度后尺寸变为 2x4，就能装入棋盘。
         board_size = (2, 4)
-        allowed_cells = [(r, c) for r in range(4) for c in range(2)]
+        allowed_cells = [(c, r) for r in range(4) for c in range(2)]
         
         solver = PackingSolver(
             shapes_to_pack=[shape],
@@ -67,7 +67,7 @@ class TestSolverRotation(unittest.TestCase):
         # 棋盘大小为 2x4
         # laser 形状默认宽度为 4，高度为 2。如果不允许旋转，它无法装入 2x4 的棋盘（因为 4 > 2 宽度超出）。
         board_size = (2, 4)
-        allowed_cells = [(r, c) for r in range(4) for c in range(2)]
+        allowed_cells = [(c, r) for r in range(4) for c in range(2)]
         
         solver = PackingSolver(
             shapes_to_pack=[shape],

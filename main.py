@@ -93,7 +93,7 @@ def main() -> None:
 
     print(f"Attempting to pack {len(shapes_to_pack)} shapes on a {board_size[0]}x{board_size[1]} board...")
 
-    allowed_cells = [(row, col) for row in range(height) for col in range(width)]
+    allowed_cells = [(col, row) for row in range(height) for col in range(width)]
     solver = PackingSolver(
         shapes_to_pack,
         board_size,

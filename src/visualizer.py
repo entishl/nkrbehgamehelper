@@ -37,8 +37,8 @@ class ResultVisualizer:
                     x0, y0, x1, y1, fill="black", outline="whitesmoke"
                 )
         # Then, draw the allowed cells on top
-        for r, c in allowed_cells:
-            x0, y0 = c * scale, r * scale + y_offset
+        for x, y in allowed_cells:
+            x0, y0 = x * scale, y * scale + y_offset
             x1, y1 = x0 + scale, y0 + scale
             self.canvas.create_rectangle(
                 x0, y0, x1, y1, fill="white", outline="whitesmoke"
