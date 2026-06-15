@@ -88,18 +88,33 @@ export function solvePacking(
   const { shapesToPack, allowedCells, boardSize, mustPlaceNames, timeLimitSec, allowRotation } = input;
   const [width, height] = boardSize;
 
-  // 1. Initialize board occupancy grid (1D Uint8Array)
+  // 1. Initialize board occupancy bitmasks (0 = free, 1 = occupied)
   const totalCells = width * height;
-  const boardOccupied = new Uint8Array(totalCells);
-  boardOccupied.fill(1); // Default to occupied/blocked (1 = true)
+  let initOcc0 = -1;
+  let initOcc1 = -1;
+  let initOcc2 = -1;
 
   let boardArea = 0;
   for (const [cx, cy] of allowedCells) {
     if (cx >= 0 && cx < width && cy >= 0 && cy < height) {
       const idx = cy * width + cx;
-      if (boardOccupied[idx] === 1) {
-        boardOccupied[idx] = 0; // Set to free/allowed (0 = false)
-        boardArea++;
+      if (idx < 32) {
+        if ((initOcc0 & (1 << idx)) !== 0) {
+          initOcc0 &= ~(1 << idx);
+          boardArea++;
+        }
+      } else if (idx < 64) {
+        const bit = idx - 32;
+        if ((initOcc1 & (1 << bit)) !== 0) {
+          initOcc1 &= ~(1 << bit);
+          boardArea++;
+        }
+      } else if (idx < 81) {
+        const bit = idx - 64;
+        if ((initOcc2 & (1 << bit)) !== 0) {
+          initOcc2 &= ~(1 << bit);
+          boardArea++;
+        }
       }
     }
   }
@@ -154,7 +169,9 @@ export function solvePacking(
   interface PlacementCandidate {
     typeId: number;
     rotation: number;
-    cells: Int32Array;
+    m0: number;
+    m1: number;
+    m2: number;
     area: number;
     points: Point[];
   }
@@ -167,7 +184,13 @@ export function solvePacking(
   for (let ey = 0; ey < height; ey++) {
     for (let ex = 0; ex < width; ex++) {
       const anchorIdx = ey * width + ex;
-      if (boardOccupied[anchorIdx] === 1) {
+      
+      let isAnchorOccupied = false;
+      if (anchorIdx < 32) isAnchorOccupied = (initOcc0 & (1 << anchorIdx)) !== 0;
+      else if (anchorIdx < 64) isAnchorOccupied = (initOcc1 & (1 << (anchorIdx - 32))) !== 0;
+      else isAnchorOccupied = (initOcc2 & (1 << (anchorIdx - 64))) !== 0;
+
+      if (isAnchorOccupied) {
         continue; // If initially occupied, cannot be anchor
       }
 
@@ -175,7 +198,9 @@ export function solvePacking(
         const shape = uniqueShapes[typeId];
         for (const orientation of shape.orientations) {
           let isValid = true;
-          const cells = new Int32Array(orientation.points.length);
+          let m0 = 0;
+          let m1 = 0;
+          let m2 = 0;
           for (let pIdx = 0; pIdx < orientation.points.length; pIdx++) {
             const [px, py] = orientation.points[pIdx];
             const cx = ex + px;
@@ -185,17 +210,33 @@ export function solvePacking(
               break;
             }
             const targetIdx = cy * width + cx;
-            if (boardOccupied[targetIdx] === 1) {
+            
+            let isTargetOccupied = false;
+            if (targetIdx < 32) isTargetOccupied = (initOcc0 & (1 << targetIdx)) !== 0;
+            else if (targetIdx < 64) isTargetOccupied = (initOcc1 & (1 << (targetIdx - 32))) !== 0;
+            else isTargetOccupied = (initOcc2 & (1 << (targetIdx - 64))) !== 0;
+
+            if (isTargetOccupied) {
               isValid = false;
               break;
             }
-            cells[pIdx] = targetIdx;
+
+            // Build masks
+            if (targetIdx < 32) {
+              m0 |= (1 << targetIdx);
+            } else if (targetIdx < 64) {
+              m1 |= (1 << (targetIdx - 32));
+            } else {
+              m2 |= (1 << (targetIdx - 64));
+            }
           }
           if (isValid) {
             candidatesByAnchor[anchorIdx].push({
               typeId,
               rotation: orientation.rotation,
-              cells,
+              m0,
+              m1,
+              m2,
               area: shape.area,
               points: orientation.points,
             });
@@ -205,7 +246,7 @@ export function solvePacking(
     }
   }
 
-  function dfs(currentArea: number, startIdx: number) {
+  function dfs(currentArea: number, o0: number, o1: number, o2: number) {
     if (Date.now() - startTime > timeLimitMs) {
       isTimedOut = true;
       return;
@@ -229,10 +270,19 @@ export function solvePacking(
       return; // Cannot beat best Area
     }
 
-    // Find the first empty cell (row-major scan)
-    let emptyIdx = startIdx;
-    while (emptyIdx < totalCells && boardOccupied[emptyIdx] === 1) {
-      emptyIdx++;
+    // LSB O(1) scan: Find the first empty cell using bitmasks
+    let emptyIdx = 0;
+    if (o0 !== -1) {
+      const val = ~o0;
+      emptyIdx = 31 - Math.clz32(val & -val);
+    } else if (o1 !== -1) {
+      const val = ~o1;
+      emptyIdx = 32 + (31 - Math.clz32(val & -val));
+    } else if (o2 !== -1) {
+      const val = ~o2;
+      emptyIdx = 64 + (31 - Math.clz32(val & -val));
+    } else {
+      emptyIdx = totalCells;
     }
 
     if (emptyIdx >= totalCells) {
@@ -245,20 +295,9 @@ export function solvePacking(
       const p = candidates[i];
       if (remainingCount[p.typeId] === 0) continue;
 
-      let canPlace = true;
-      // cells[0] is emptyIdx itself, which is already known to be free (0)
-      for (let cIdx = 1; cIdx < p.cells.length; cIdx++) {
-        if (boardOccupied[p.cells[cIdx]] === 1) {
-          canPlace = false;
-          break;
-        }
-      }
-
-      if (canPlace) {
+      // Check if candidate overlaps with current occupancy
+      if (((o0 & p.m0) | (o1 & p.m1) | (o2 & p.m2)) === 0) {
         // Place it
-        for (let cIdx = 0; cIdx < p.cells.length; cIdx++) {
-          boardOccupied[p.cells[cIdx]] = 1;
-        }
         remainingCount[p.typeId]--;
         emptyCellsRemaining -= p.area;
         remainingShapeArea -= p.area;
@@ -274,34 +313,40 @@ export function solvePacking(
           color: shape.color,
         });
 
-        dfs(currentArea + p.area, emptyIdx + 1);
+        // Recursion with updated masks (no explicit backtrack needed for bitmasks)
+        dfs(currentArea + p.area, o0 | p.m0, o1 | p.m1, o2 | p.m2);
 
-        // Backtrack
+        // Backtrack other states
         currentPlacedList.pop();
         if (shape.mustPlace) mustRemaining++;
         remainingShapeArea += p.area;
         emptyCellsRemaining += p.area;
         remainingCount[p.typeId]++;
-        for (let cIdx = 0; cIdx < p.cells.length; cIdx++) {
-          boardOccupied[p.cells[cIdx]] = 0;
-        }
 
         if (bestArea === boardArea || isTimedOut) return;
       }
     }
 
     // Branch 2: Abandon this empty cell
-    boardOccupied[emptyIdx] = 1; // Mark as permanently abandoned
+    let nextO0 = o0;
+    let nextO1 = o1;
+    let nextO2 = o2;
+    if (emptyIdx < 32) {
+      nextO0 |= (1 << emptyIdx);
+    } else if (emptyIdx < 64) {
+      nextO1 |= (1 << (emptyIdx - 32));
+    } else {
+      nextO2 |= (1 << (emptyIdx - 64));
+    }
     emptyCellsRemaining -= 1;
 
-    dfs(currentArea, emptyIdx + 1);
+    dfs(currentArea, nextO0, nextO1, nextO2);
 
-    boardOccupied[emptyIdx] = 0; // Restore
     emptyCellsRemaining += 1;
   }
 
-  // Execute DFS starting from index 0
-  dfs(0, 0);
+  // Execute DFS starting from initial occupancy masks
+  dfs(0, initOcc0, initOcc1, initOcc2);
 
   // Determine solver status
   let status: 'OPTIMAL' | 'FEASIBLE' | 'INFEASIBLE' | 'UNKNOWN';
