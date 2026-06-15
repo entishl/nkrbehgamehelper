@@ -118,6 +118,43 @@ class TestSolverRotation(unittest.TestCase):
         self.assertEqual(len(result.placed_shapes), 1)
         self.assertEqual(result.placed_shapes[0].name, "square")
 
+    def test_symmetry_pruning_with_rotation_disabled(self):
+        """测试在禁止旋转的情况下，对称性剪枝不会导致漏掉唯一可行解。"""
+        # A: 2x2 正方形 (具有 180 度对称性)，面积为 4
+        # B: L型三格板 (不具有 180 度对称性)，面积为 3
+        shape_a = Shape(
+            name="square_A",
+            points=[(0, 0), (1, 0), (0, 1), (1, 1)],
+            area=4,
+            color="#FF0000"
+        )
+        shape_b = Shape(
+            name="L_B",
+            points=[(0, 0), (1, 0), (0, 1)],
+            area=3,
+            color="#00FF00"
+        )
+        
+        # 3x3 棋盘，全网格可用
+        board_size = (3, 3)
+        allowed_cells = [(c, r) for r in range(3) for c in range(3)]
+        
+        # 强制要求两个形状都必须放置
+        solver = PackingSolver(
+            shapes_to_pack=[shape_a, shape_b],
+            board_size=board_size,
+            allowed_cells=allowed_cells,
+            must_place_names=["square_A", "L_B"],
+            allow_rotation=False
+        )
+        result = solver.solve()
+        
+        # 如果有对称性剪枝的 bug，这会返回 INFEASIBLE。
+        # 修复后应该能找到 OPTIMAL 解。
+        self.assertEqual(result.status, PackingStatus.OPTIMAL)
+        self.assertEqual(len(result.placed_shapes), 2)
+
 
 if __name__ == "__main__":
     unittest.main()
+

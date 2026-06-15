@@ -179,6 +179,11 @@ class PackingSolver:
                     valid.append((x, y))
         return valid
 
+    def _shape_has_180_symmetry(self, shape: Shape) -> bool:
+        """Check if the shape has 180-degree rotational symmetry."""
+        pts = normalize_points([tuple(p) for p in shape.points])
+        return rotate_points(pts, 180) == pts
+
     def solve(self) -> PackingResult:
         """
         执行主要的求解逻辑并返回一个 PackingResult 对象。
@@ -306,10 +311,17 @@ class PackingSolver:
             if (self.board_width - 1 - x, self.board_height - 1 - y) not in self.allowed_cells_set:
                 point_sym = False
                 break
-                
+
+        # 如果禁止旋转且存在不具有180度旋转对称的形状，则不能安全地应用中心对称剪枝，
+        # 因为这可能导致唯一的合法解对应的形状朝向在旋转后被判定为非法。
+        can_use_point_symmetry = point_sym and (
+            self.allow_rotation
+            or all(self._shape_has_180_symmetry(shape) for shape in self.shapes_to_pack)
+        )
+
         anchor_idx = -1
         max_area = -1
-        if point_sym:
+        if can_use_point_symmetry:
             for i, shape in enumerate(self.shapes_to_pack):
                 if shape.area > max_area:
                     max_area = shape.area
