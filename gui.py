@@ -5,8 +5,6 @@ import json
 from random import choice
 from collections import Counter
 import threading
-import webbrowser
-from tkinter import font as tkfont
 
 from src.solver import solve_packing
 from src.utils import resource_path
@@ -70,6 +68,9 @@ class ShapePackingGUI(tk.Tk):
 
         self.always_on_top = tk.BooleanVar()
         self.always_on_top.set(False)
+
+        self.allow_rotation = tk.BooleanVar()
+        self.allow_rotation.set(True)
 
         self.shape_lock_vars = {}
         self.shape_lock_labels = {}
@@ -194,6 +195,11 @@ class ShapePackingGUI(tk.Tk):
             bottom_frame, text="Always on Top", variable=self.always_on_top, command=self.toggle_always_on_top
         )
         always_on_top_button.pack(side=tk.LEFT, padx=(5, 0))
+
+        allow_rotation_button = ttk.Checkbutton(
+            bottom_frame, text="允许旋转", variable=self.allow_rotation
+        )
+        allow_rotation_button.pack(side=tk.LEFT, padx=(10, 0))
 
         time_limit_label = ttk.Label(bottom_frame, text="Time Limit (s):")
         time_limit_label.pack(side=tk.LEFT, padx=(10, 0))
@@ -595,6 +601,7 @@ class ShapePackingGUI(tk.Tk):
                 board_size=(GRID_WIDTH, GRID_HEIGHT),
                 must_place_names=must_place_names,
                 time_limit_sec=time_limit,
+                allow_rotation=self.allow_rotation.get(),
             )
 
             # Reconstruct unplaced_shapes with full data for visualization

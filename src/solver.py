@@ -38,12 +38,13 @@ def rotate_points(points: List[Point], rotation: int) -> List[Point]:
     return normalize_points(rotated)
 
 
-def generate_unique_orientations(points: List[Point]) -> List[Dict]:
-    """Return unique 0/90/180/270-degree orientations for a shape."""
+def generate_unique_orientations(points: List[Point], allow_rotation: bool = True) -> List[Dict]:
+    """Return unique orientations for a shape (only 0-degree if allow_rotation is False)."""
     orientations = []
     seen = set()
 
-    for rotation in (0, 90, 180, 270):
+    rotations = (0, 90, 180, 270) if allow_rotation else (0,)
+    for rotation in rotations:
         rotated_points = rotate_points(points, rotation)
         key = tuple(rotated_points)
         if key in seen:
@@ -144,12 +145,14 @@ class PackingSolver:
         allowed_cells: Optional[List[Tuple[int, int]]] = None,
         must_place_names: Optional[List[str]] = None,
         time_limit_sec: int = 30,
+        allow_rotation: bool = True,
     ):
         self.shapes_to_pack = shapes_to_pack
         self.board_width, self.board_height = board_size
         self.allowed_cells = allowed_cells
         self.must_place_names = must_place_names if must_place_names is not None else []
         self.time_limit_sec = time_limit_sec
+        self.allow_rotation = allow_rotation
 
         self.model = cp_model.CpModel()
         self.shape_vars: List[Dict] = []
@@ -200,7 +203,9 @@ class PackingSolver:
             normalized_points = normalize_points([tuple(p) for p in shape.points])
             cache_key = tuple(normalized_points)
             if cache_key not in self.orientation_cache:
-                self.orientation_cache[cache_key] = generate_unique_orientations(normalized_points)
+                self.orientation_cache[cache_key] = generate_unique_orientations(
+                    normalized_points, allow_rotation=self.allow_rotation
+                )
 
     def _get_shape_orientations(self, shape: Shape) -> List[Dict]:
         normalized_points = normalize_points([tuple(p) for p in shape.points])
@@ -383,6 +388,7 @@ def solve_packing(
     board_size: Tuple[int, int] = (10, 10),
     must_place_names: Optional[List[str]] = None,
     time_limit_sec: int = 30,
+    allow_rotation: bool = True,
 ) -> Tuple[List[Dict], List[str], str]:
     """
     用于与 gui.py 兼容的包装函数。
@@ -405,6 +411,7 @@ def solve_packing(
         allowed_cells=allowed_cells,
         must_place_names=must_place_names,
         time_limit_sec=time_limit_sec,
+        allow_rotation=allow_rotation,
     )
     result = solver.solve()
 

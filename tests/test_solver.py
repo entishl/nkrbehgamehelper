@@ -53,6 +53,42 @@ class TestSolverRotation(unittest.TestCase):
         # 验证旋转角度是否为 90 或 270 度之一
         self.assertIn(result.placed_shapes[0].rotation, [90, 270])
 
+    def test_solve_without_rotation(self):
+        """测试当不允许旋转时，形状必须以初始方向放入棋盘的逻辑。"""
+        # 定义一个 4x2 的条形 (laser)
+        laser_points = [(0, 0), (1, 0), (2, 0), (3, 0), (0, 1)]
+        shape = Shape(
+            name="laser",
+            points=laser_points,
+            area=5,
+            color="#FFFFFF"
+        )
+        
+        # 棋盘大小为 2x4
+        # laser 形状默认宽度为 4，高度为 2。如果不允许旋转，它无法装入 2x4 的棋盘（因为 4 > 2 宽度超出）。
+        board_size = (2, 4)
+        allowed_cells = [(r, c) for r in range(4) for c in range(2)]
+        
+        solver = PackingSolver(
+            shapes_to_pack=[shape],
+            board_size=board_size,
+            allowed_cells=allowed_cells,
+            must_place_names=["laser"],
+            allow_rotation=False
+        )
+        result = solver.solve()
+        
+        self.assertEqual(result.status, PackingStatus.INFEASIBLE)
+        self.assertEqual(len(result.placed_shapes), 0)
+
+    def test_orientation_without_rotation(self):
+        """测试 allow_rotation=False 时，生成唯一方向的数量。"""
+        # 不对称的 SG 形状，如果允许旋转有 4 种方向，如果不允许旋转应该只有 1 种。
+        sg_points = [(0, 0), (1, 0), (2, 0), (0, 1)]
+        sg_orientations = generate_unique_orientations(sg_points, allow_rotation=False)
+        self.assertEqual(len(sg_orientations), 1)
+        self.assertEqual(sg_orientations[0]["rotation"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
