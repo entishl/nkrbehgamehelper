@@ -157,6 +157,7 @@ class PackingSolver:
         self.model = cp_model.CpModel()
         self.shape_vars: List[Dict] = []
         self.orientation_cache: Dict[Tuple[Point, ...], List[Dict]] = {}
+        self.valid_position_cache: Dict[Tuple[Point, ...], List[Tuple[int, int]]] = {}
         self.allowed_cells_set = {tuple(cell) for cell in self.allowed_cells} if self.allowed_cells else set()
 
     def _valid_positions_for_orientation(self, points: List[Point], width: int, height: int) -> List[Tuple[int, int]]:
@@ -234,11 +235,14 @@ class PackingSolver:
                 if shape_width > self.board_width or shape_height > self.board_height:
                     continue
 
-                valid_positions = self._valid_positions_for_orientation(
-                    orientation_data["points"],
-                    shape_width,
-                    shape_height,
-                )
+                cache_key = tuple(orientation_data["points"])
+                if cache_key not in self.valid_position_cache:
+                    self.valid_position_cache[cache_key] = self._valid_positions_for_orientation(
+                        orientation_data["points"],
+                        shape_width,
+                        shape_height,
+                    )
+                valid_positions = self.valid_position_cache[cache_key]
 
                 if not valid_positions:
                     continue
@@ -302,20 +306,20 @@ class PackingSolver:
                     rect_dx, rect_dy, rect_w, rect_h = rect
                     suffix = f"{s['id']}_{orientation['rotation']}_{k}"
 
-                    x_start = self.model.NewIntVar(0, self.board_width, f"x_start_{suffix}")
-                    x_end = self.model.NewIntVar(0, self.board_width, f"x_end_{suffix}")
-                    self.model.Add(x_start == orientation["x"] + rect_dx)
-                    self.model.Add(x_end == x_start + rect_w)
                     x_interval = self.model.NewOptionalIntervalVar(
-                        x_start, rect_w, x_end, orientation["is_used"], f"x_interval_{suffix}"
+                        orientation["x"] + rect_dx,
+                        rect_w,
+                        orientation["x"] + rect_dx + rect_w,
+                        orientation["is_used"],
+                        f"x_interval_{suffix}",
                     )
 
-                    y_start = self.model.NewIntVar(0, self.board_height, f"y_start_{suffix}")
-                    y_end = self.model.NewIntVar(0, self.board_height, f"y_end_{suffix}")
-                    self.model.Add(y_start == orientation["y"] + rect_dy)
-                    self.model.Add(y_end == y_start + rect_h)
                     y_interval = self.model.NewOptionalIntervalVar(
-                        y_start, rect_h, y_end, orientation["is_used"], f"y_interval_{suffix}"
+                        orientation["y"] + rect_dy,
+                        rect_h,
+                        orientation["y"] + rect_dy + rect_h,
+                        orientation["is_used"],
+                        f"y_interval_{suffix}",
                     )
 
                     all_x_intervals.append(x_interval)
