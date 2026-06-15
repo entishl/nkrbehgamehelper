@@ -110,7 +110,7 @@ export const ShapeSelector: React.FC<ShapeSelectorProps> = ({
               key={shape.name}
               className={`shape-card ${count > 0 ? 'shape-card-active' : 'shape-card-inactive'}`}
             >
-              {/* Left: Lock and SVG */}
+              {/* Left: Lock, SVG and Name underneath SVG */}
               <div className="shape-card-left">
                 <button
                   type="button"
@@ -125,19 +125,15 @@ export const ShapeSelector: React.FC<ShapeSelectorProps> = ({
                 <ShapeSvgPreview points={shape.points} color={shape.color} size={36} />
               </div>
 
-              {/* Right: Info and Count controls */}
+              {/* Right: Quantity controls */}
               <div className="shape-card-right">
-                <span className="shape-card-name">
-                  {shape.name}
-                </span>
-
                 <div className="quantity-control">
                   <button
                     type="button"
                     onClick={() => handleDecrement(shape.name)}
                     className="quantity-btn"
                   >
-                    <Minus size={12} />
+                    <Minus size={14} />
                   </button>
                   <input
                     type="text"
@@ -150,7 +146,7 @@ export const ShapeSelector: React.FC<ShapeSelectorProps> = ({
                     onClick={() => handleIncrement(shape.name)}
                     className="quantity-btn"
                   >
-                    <Plus size={12} />
+                    <Plus size={14} />
                   </button>
                 </div>
               </div>

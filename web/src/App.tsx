@@ -34,9 +34,13 @@ export default function App() {
         );
   });
 
-  const [timeLimitSec, setTimeLimitSec] = useState<number>(() => {
+  const [timeLimitSec, setTimeLimitSec] = useState<number | "">( () => {
     const saved = localStorage.getItem('timeLimitSec');
-    return saved ? parseInt(saved, 10) : 30;
+    if (saved) {
+      const parsed = parseInt(saved, 10);
+      return isNaN(parsed) ? 10 : parsed;
+    }
+    return 10;
   });
 
   const [allowRotation, setAllowRotation] = useState<boolean>(() => {
@@ -73,7 +77,9 @@ export default function App() {
   }, [gridStatus]);
 
   useEffect(() => {
-    localStorage.setItem('timeLimitSec', String(timeLimitSec));
+    if (typeof timeLimitSec === 'number') {
+      localStorage.setItem('timeLimitSec', String(timeLimitSec));
+    }
   }, [timeLimitSec]);
 
   useEffect(() => {
@@ -113,7 +119,7 @@ export default function App() {
         )
       );
       setShapesData(defaultShapes);
-      setTimeLimitSec(30);
+      setTimeLimitSec(10);
       setAllowRotation(true);
       setSolverResult(null);
       setBestAreaSoFar(0);
@@ -187,7 +193,7 @@ export default function App() {
       allowedCells,
       boardSize: [9, 9],
       mustPlaceNames,
-      timeLimitSec,
+      timeLimitSec: typeof timeLimitSec === 'number' ? Math.max(5, Math.min(300, timeLimitSec)) : 10,
       allowRotation,
     };
 
@@ -390,7 +396,22 @@ export default function App() {
                   min="5"
                   max="300"
                   value={timeLimitSec}
-                  onChange={(e) => setTimeLimitSec(Math.max(5, parseInt(e.target.value, 10) || 5))}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === '') {
+                      setTimeLimitSec('');
+                    } else {
+                      const num = parseInt(val, 10);
+                      setTimeLimitSec(isNaN(num) ? '' : num);
+                    }
+                  }}
+                  onBlur={() => {
+                    if (timeLimitSec === '' || timeLimitSec < 5) {
+                      setTimeLimitSec(5);
+                    } else if (timeLimitSec > 300) {
+                      setTimeLimitSec(300);
+                    }
+                  }}
                   className="config-input-number"
                 />
               </div>
@@ -430,7 +451,7 @@ export default function App() {
               ) : (
                 <button
                   onClick={handleCalculate}
-                  className="btn-primary"
+                  className="btn-metal"
                   style={{ width: '100%', padding: '12px' }}
                 >
                   <Play size={16} fill="white" />
