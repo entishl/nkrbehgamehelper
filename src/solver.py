@@ -165,7 +165,11 @@ class PackingSolver:
         self.shape_vars: List[Dict] = []
         self.orientation_cache: Dict[Tuple[Point, ...], List[Dict]] = {}
         self.valid_position_cache: Dict[Tuple[Point, ...], List[Tuple[int, int]]] = {}
-        self.allowed_cells_set = {tuple(cell) for cell in self.allowed_cells} if self.allowed_cells else set()
+        self.allowed_cells_set = {
+            tuple(cell)
+            for cell in self.allowed_cells
+            if 0 <= cell[0] < self.board_width and 0 <= cell[1] < self.board_height
+        } if self.allowed_cells else set()
 
     def _valid_positions_for_orientation(self, points: List[Point], width: int, height: int) -> List[Tuple[int, int]]:
         valid = []
@@ -179,7 +183,7 @@ class PackingSolver:
         """
         执行主要的求解逻辑并返回一个 PackingResult 对象。
         """
-        if not self.allowed_cells:
+        if not self.allowed_cells_set:
             return PackingResult(
                 placed_shapes=[],
                 unplaced_shapes=[s.name for s in self.shapes_to_pack],
@@ -191,7 +195,7 @@ class PackingSolver:
 
         # 确定策略
         total_shape_area = sum(s.area for s in self.shapes_to_pack)
-        board_area = len(self.allowed_cells)
+        board_area = len(self.allowed_cells_set)
         strategy = "P0" if total_shape_area <= board_area else "P1"
         print(f"预处理: 形状总面积={total_shape_area}, 棋盘面积={board_area}. 采用策略: {strategy}")
 

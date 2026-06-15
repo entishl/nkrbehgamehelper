@@ -89,6 +89,35 @@ class TestSolverRotation(unittest.TestCase):
         self.assertEqual(len(sg_orientations), 1)
         self.assertEqual(sg_orientations[0]["rotation"], 0)
 
+    def test_solve_with_duplicate_and_out_of_bounds_cells(self):
+        """测试 allowed_cells 中有重复格子和越界格子时的求解行为。"""
+        # 定义一个 2x2 的正方形形状
+        square_points = [(0, 0), (1, 0), (0, 1), (1, 1)]
+        shape = Shape(
+            name="square",
+            points=square_points,
+            area=4,
+            color="#FFFFFF"
+        )
+        
+        # 棋盘大小为 2x2
+        board_size = (2, 2)
+        # 传入的 allowed_cells 包含重复格子 (0, 0) 和越界格子 (2, 2), (-1, 0)
+        allowed_cells = [(0, 0), (0, 0), (1, 0), (0, 1), (1, 1), (2, 2), (-1, 0)]
+        
+        solver = PackingSolver(
+            shapes_to_pack=[shape],
+            board_size=board_size,
+            allowed_cells=allowed_cells
+        )
+        result = solver.solve()
+        
+        # 即使有重复和越界格子，由于去重和过滤，实际可用面积应为 4
+        # 形状面积也是 4，应该能成功以 OPTIMAL 状态装入
+        self.assertEqual(result.status, PackingStatus.OPTIMAL)
+        self.assertEqual(len(result.placed_shapes), 1)
+        self.assertEqual(result.placed_shapes[0].name, "square")
+
 
 if __name__ == "__main__":
     unittest.main()
