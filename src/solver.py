@@ -85,11 +85,18 @@ def extract_solution_from_provider(shape_vars: List[Dict], value_provider) -> Tu
             unplaced_shapes.append(s["original_shape"].name)
             continue
 
+        # Find the specific placement that was selected
+        x, y = 0, 0
+        for b_pos, px, py in selected_orientation["placements"]:
+            if value_provider.Value(b_pos):
+                x, y = px, py
+                break
+
         placed_shapes.append(
             PlacedShape(
                 name=s["name"],
-                x=value_provider.Value(selected_orientation["x"]),
-                y=value_provider.Value(selected_orientation["y"]),
+                x=x,
+                y=y,
                 points=selected_orientation["points"],
                 color=s["color"],
                 rotation=selected_orientation["rotation"],
@@ -220,6 +227,12 @@ class PackingSolver:
             else:  # P1
                 total_area = sum(s["area"] * s["is_used"] for s in self.shape_vars)
                 self.model.Add(total_area == board_area)
+                
+            # ---- 新增：精确覆盖的强制全网格覆盖约束 ----
+            if (strategy == "P0" and total_shape_area == board_area) or strategy == "P1":
+                for c_var in self.cell_covered_vars.values():
+                    self.model.Add(c_var == 1)
+            # ------------------------------------------
 
             # 不设 Objective
             solver = cp_model.CpSolver()
@@ -285,6 +298,25 @@ class PackingSolver:
 
     def _create_variables(self):
         """为模型创建变量。"""
+        self.cell_to_placement_vars = {cell: [] for cell in self.allowed_cells_set}
+        
+        # 预先计算中心对称性 (Point Symmetry / 180-degree rotation)
+        # 我们不能使用水平或垂直镜像，因为形状本身不一定允许镜像翻转，只允许旋转。
+        # 180度旋转始终是安全的，因为它不改变任何形状的手性。
+        point_sym = True
+        for x, y in self.allowed_cells_set:
+            if (self.board_width - 1 - x, self.board_height - 1 - y) not in self.allowed_cells_set:
+                point_sym = False
+                break
+                
+        anchor_idx = -1
+        max_area = -1
+        if point_sym:
+            for i, shape in enumerate(self.shapes_to_pack):
+                if shape.area > max_area:
+                    max_area = shape.area
+                    anchor_idx = i
+
         for i, shape in enumerate(self.shapes_to_pack):
             is_used = self.model.NewBoolVar(f"is_used_{i}")
             orientation_vars = []
@@ -306,12 +338,45 @@ class PackingSolver:
                     )
                 valid_positions = self.valid_position_cache[cache_key]
 
+                # ----- 对称性破坏 (仅针对面积最大的 anchor shape) -----
+                if i == anchor_idx:
+                    filtered_positions = []
+                    board_center_x = (self.board_width - 1) / 2.0
+                    board_center_y = (self.board_height - 1) / 2.0
+                    for px, py in valid_positions:
+                        center_x = px + (shape_width - 1) / 2.0
+                        center_y = py + (shape_height - 1) / 2.0
+                        
+                        # 在中心对称的棋盘上，限制锚点形状只能出现在上半部分，
+                        # 或者刚好在中轴线上时，限制在左半部分。
+                        # 这样安全地砍掉恰好一半的搜索空间。
+                        if center_y < board_center_y or (center_y == board_center_y and center_x <= board_center_x):
+                            filtered_positions.append((px, py))
+                    valid_positions = filtered_positions
+                # ----------------------------------------
+
                 if not valid_positions:
                     continue
 
                 orientation_is_used = self.model.NewBoolVar(f"is_used_{i}_rot_{orientation_data['rotation']}")
-                x = self.model.NewIntVar(0, self.board_width - shape_width, f"x_{i}_rot_{orientation_data['rotation']}")
-                y = self.model.NewIntVar(0, self.board_height - shape_height, f"y_{i}_rot_{orientation_data['rotation']}")
+
+                # 为这个朝向的每个合法位置创建一个布尔变量 (Boolean Grid Model)
+                placement_bools = []
+                placements = []
+                
+                for px, py in valid_positions:
+                    b_pos = self.model.NewBoolVar(f"pos_{i}_rot_{orientation_data['rotation']}_{px}_{py}")
+                    placement_bools.append(b_pos)
+                    placements.append((b_pos, px, py))
+                    
+                    # 将这个摆法添加到它覆盖的格子列表中
+                    for dx, dy in orientation_data["points"]:
+                        cx, cy = px + dx, py + dy
+                        if (cx, cy) in self.cell_to_placement_vars:
+                            self.cell_to_placement_vars[(cx, cy)].append(b_pos)
+
+                # 将位置布尔变量与兼容旧 API 的整数变量关联
+                self.model.Add(orientation_is_used == sum(placement_bools))
 
                 orientation_vars.append(
                     {
@@ -321,8 +386,7 @@ class PackingSolver:
                         "width": shape_width,
                         "height": shape_height,
                         "is_used": orientation_is_used,
-                        "x": x,
-                        "y": y,
+                        "placements": placements,
                         "valid_positions": valid_positions,
                     }
                 )
@@ -352,43 +416,23 @@ class PackingSolver:
                 if s["name"] in self.must_place_names:
                     self.model.Add(s["is_used"] == 1)
 
-        for s in self.shape_vars:
-            for orientation in s["orientations"]:
-                self.model.AddAllowedAssignments(
-                    [orientation["x"], orientation["y"]],
-                    orientation["valid_positions"],
-                ).OnlyEnforceIf(orientation["is_used"])
+        # --- 新的不重叠约束 (基于布尔网格) ---
+        self.cell_covered_vars = {}
+        for cell, pos_vars in self.cell_to_placement_vars.items():
+            if pos_vars:
+                # 每个格子最多被一个形状的一个位置覆盖
+                self.model.AddAtMostOne(pos_vars)
+                # 定义 CellCovered 布尔变量 (用于死角预防和完整覆盖验证)
+                c_var = self.model.NewBoolVar(f"cell_covered_{cell[0]}_{cell[1]}")
+                self.model.Add(c_var == sum(pos_vars))
+                self.cell_covered_vars[cell] = c_var
+            else:
+                # 没有任何形状可以覆盖到这个格子
+                c_var = self.model.NewBoolVar(f"cell_covered_{cell[0]}_{cell[1]}")
+                self.model.Add(c_var == 0)
+                self.cell_covered_vars[cell] = c_var
 
-        # 不重叠约束
-        all_x_intervals = []
-        all_y_intervals = []
-        for s in self.shape_vars:
-            for orientation in s["orientations"]:
-                for k, rect in enumerate(orientation["rectangles"]):
-                    rect_dx, rect_dy, rect_w, rect_h = rect
-                    suffix = f"{s['id']}_{orientation['rotation']}_{k}"
 
-                    x_interval = self.model.NewOptionalIntervalVar(
-                        orientation["x"] + rect_dx,
-                        rect_w,
-                        orientation["x"] + rect_dx + rect_w,
-                        orientation["is_used"],
-                        f"x_interval_{suffix}",
-                    )
-
-                    y_interval = self.model.NewOptionalIntervalVar(
-                        orientation["y"] + rect_dy,
-                        rect_h,
-                        orientation["y"] + rect_dy + rect_h,
-                        orientation["is_used"],
-                        f"y_interval_{suffix}",
-                    )
-
-                    all_x_intervals.append(x_interval)
-                    all_y_intervals.append(y_interval)
-
-        if all_x_intervals:
-            self.model.AddNoOverlap2D(all_x_intervals, all_y_intervals)
 
         # 对称性破坏：同名重复形状优先使用前面的实例，减少等价搜索分支。
         grouped_shapes = defaultdict(list)
