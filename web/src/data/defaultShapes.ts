@@ -97,5 +97,11 @@ export const defaultShapes: Shape[] = [
     points: [[0, 0], [1, 0], [2, 0], [1, 1]],
     color: '#05DFD7',
   },
+  {
+    name: 'guangdan',
+    area: 4,
+    points: [[0, 0], [1, 0], [1, 1], [2, 1]],
+    color: '#3357FF',
+  }
 ];
 export {};
